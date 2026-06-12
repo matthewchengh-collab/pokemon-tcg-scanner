@@ -44,6 +44,12 @@
   }
   input::placeholder { color: #8a7fb0; }
 
+  /* Language toggle */
+  .lang-toggle { display: flex; gap: 8px; margin-bottom: 12px; }
+  .lang-btn { flex: 1; padding: 10px; border-radius: 11px; font-size: 14px; font-weight: 600; cursor: pointer;
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15); color: #b8a9e0; }
+  .lang-btn.active { background: linear-gradient(135deg, #ffcb05 0%, #ff9500 100%); color: #1a1c2e; border-color: transparent; }
+
   /* Section label */
   .sec { font-size: 12px; font-weight: 700; color: #b8a9e0; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px; }
   .hint { font-size: 12px; color: #8a7fb0; line-height: 1.5; }
@@ -134,9 +140,13 @@
 <div class="page active" id="page-search">
   <div class="panel">
     <div class="sec">Find a Card</div>
+    <div class="lang-toggle">
+      <button class="lang-btn active" id="langEn" onclick="setLang('en')">🇺🇸 English</button>
+      <button class="lang-btn"        id="langJp" onclick="setLang('jp')">🇯🇵 Japanese</button>
+    </div>
     <input id="searchName" placeholder="Card name — e.g. Charizard, Pikachu" inputmode="search">
     <input id="searchNum"  placeholder="Card number — e.g. 4/102 (optional)" inputmode="text" style="margin-bottom:6px">
-    <div class="hint" style="margin-bottom:10px">Name search finds all versions. Add a number to narrow down.</div>
+    <div class="hint" id="searchHint" style="margin-bottom:10px">Name search finds all versions. Add a number to narrow down.</div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-primary" style="margin:0" onclick="doSearch()">Search</button>
       <button class="btn btn-secondary btn-sm" id="scanToggleBtn" onclick="toggleScanCamera()">📷 Scan #</button>
@@ -224,6 +234,8 @@
 //  State
 // ══════════════════════════════════════════════════════════
 const TCGAPI = 'https://api.pokemontcg.io/v2/cards';
+const JPAPI  = 'https://api.tcgdex.net/v2/ja/cards';
+let lang         = 'en';
 let currentCard  = null;
 let scanStream   = null, scanning = false;
 let condStream   = null, condCameraOn = false, condPhoto = null;
@@ -254,6 +266,22 @@ function showTab(tab) {
 // ══════════════════════════════════════════════════════════
 //  Search
 // ══════════════════════════════════════════════════════════
+function setLang(l) {
+  lang = l;
+  localStorage.setItem('card_lang', l);
+  document.getElementById('langEn').classList.toggle('active', l === 'en');
+  document.getElementById('langJp').classList.toggle('active', l === 'jp');
+  const nameInput = document.getElementById('searchName');
+  const hint = document.getElementById('searchHint');
+  if (l === 'jp') {
+    nameInput.placeholder = 'Japanese name (リザードン) — or just use the number';
+    hint.innerHTML = '🇯🇵 Scan or type the <b>number</b> (works best), then pick your card from the photos. English names won\'t match Japanese cards.';
+  } else {
+    nameInput.placeholder = 'Card name — e.g. Charizard, Pikachu';
+    hint.textContent = 'Name search finds all versions. Add a number to narrow down.';
+  }
+}
+
 async function doSearch() {
   const name = document.getElementById('searchName').value.trim();
   const num  = document.getElementById('searchNum').value.trim();
@@ -261,6 +289,8 @@ async function doSearch() {
 
   setResults('<div class="loading">🔍 Searching…</div>');
   document.getElementById('cardDetail').innerHTML = '';
+
+  if (lang === 'jp') { return doSearchJP(name, num); }
 
   try {
     // card numbers are stored bare in the API ("4", not "004") — strip leading zeros
@@ -286,6 +316,43 @@ async function doSearch() {
   }
 }
 
+// ─── Japanese cards (TCGdex) ───
+async function doSearchJP(name, num) {
+  try {
+    let url;
+    if (name) url = `${JPAPI}?name=${encodeURIComponent(name)}`;
+    else      url = `${JPAPI}?localId=${encodeURIComponent(num.split('/')[0].replace(/^0+(?=\d)/, ''))}`;
+
+    const brief = await fetch(url).then(r => r.json());
+    const cards = (brief || []).map(c => ({
+      _jp: true, id: c.id, name: c.name, number: c.localId,
+      rarity: '', set: { name: '' },
+      images: { small: c.image ? c.image + '/low.webp' : null, large: c.image ? c.image + '/high.png' : null },
+      tcgplayer: null,
+    }));
+
+    if (!cards.length) { setResults('<div class="err">No Japanese cards found. Try the number, or paste the Japanese name.</div>'); return; }
+    if (cards.length === 1) { selectCardJP(cards[0]); return; }
+    renderResultsList(cards.slice(0, 40));   // cap; pick visually from photos
+  } catch(e) {
+    setResults('<div class="err">Japanese search failed — check your connection and try again.</div>');
+  }
+}
+
+async function selectCardJP(card) {
+  setResults('<div class="loading">Loading card…</div>');
+  try {
+    // brief list lacks set/rarity — fetch full detail to enrich
+    const d = await fetch(`${JPAPI}/${card.id}`).then(r => r.json());
+    card.set    = { name: d.set?.name || '', printedTotal: d.set?.cardCount?.official || '' };
+    card.rarity = d.rarity || '';
+    if (d.image) card.images = { small: d.image + '/low.webp', large: d.image + '/high.png' };
+  } catch(e) {}
+  currentCard = card;
+  setResults('');
+  renderCardDetail(card);
+}
+
 async function fetchCards(q, n) {
   const r = await fetch(`${TCGAPI}?q=${encodeURIComponent(q)}&orderBy=-set.releaseDate&pageSize=${n}`);
   const j = await r.json();
@@ -299,15 +366,18 @@ function renderResultsList(cards) {
   let html = `<div class="sec" style="padding:0 4px;margin-bottom:8px">${cards.length} results — tap a card</div>`;
   cards.forEach((c, i) => {
     const p = bestPrice(c);
-    const priceStr = p && p.market != null ? `$${p.market.toFixed(2)}` : '—';
+    const priceStr = p && p.market != null ? `$${p.market.toFixed(2)}` : (c._jp ? '🇯🇵' : '—');
     const thumb = c.images?.small
       ? `<img src="${c.images.small}" onerror="this.style.display='none'">`
       : `<div class="result-thumb"></div>`;
+    const sub = c._jp
+      ? `${c.set?.name || 'Japanese card'} · #${c.number}`
+      : `${c.set?.name || ''} · #${c.number} · ${c.rarity || 'Common'}`;
     html += `<div class="result-item" onclick="selectCardByIdx(${i})">
       ${thumb}
       <div class="result-info">
         <div class="result-name">${c.name}</div>
-        <div class="result-sub">${c.set.name} · #${c.number} · ${c.rarity || 'Common'}</div>
+        <div class="result-sub">${sub}</div>
       </div>
       <div class="result-price">${priceStr}</div>
     </div>`;
@@ -315,7 +385,7 @@ function renderResultsList(cards) {
   setResults(html);
 }
 
-function selectCardByIdx(i) { selectCard(_searchCards[i]); }
+function selectCardByIdx(i) { const c = _searchCards[i]; c._jp ? selectCardJP(c) : selectCard(c); }
 
 function selectCard(card) {
   currentCard = card;
@@ -332,10 +402,12 @@ function renderCardDetail(card) {
   let html = '';
   if (imgLarge) html += `<img class="card-img-lg" src="${imgLarge}" alt="${card.name}">`;
   html += `<div class="card-title">${card.name}</div>`;
-  html += `<div class="card-sub">${card.set.name} · #${card.number}/${card.set.printedTotal || '?'} · ${card.rarity || ''}</div>`;
+  html += `<div class="card-sub">${card.set?.name || ''} · #${card.number}/${card.set?.printedTotal || '?'} · ${card.rarity || ''}</div>`;
 
   // Prices
-  if (tp && Object.keys(tp).length) {
+  if (card._jp) {
+    html += `<div class="verdict v-yellow">🇯🇵 <b>Japanese card — no free live price feed.</b><br>Tap <b>See sold on eBay</b> below for real recent sale prices, then use the Condition tab to judge if it's grade-worthy.</div>`;
+  } else if (tp && Object.keys(tp).length) {
     html += `<div class="sec">TCGPlayer Prices</div>`;
     const variantLabel = { normal:'Normal', holofoil:'Holofoil', reverseHolofoil:'Reverse Holo', '1stEditionHolofoil':'1st Ed Holo', unlimitedHolofoil:'Unlimited Holo' };
     Object.entries(tp).forEach(([key, vals]) => {
@@ -363,9 +435,11 @@ function renderCardDetail(card) {
     else html += `<div class="verdict v-red">📦 <b>Not worth grading</b> — at $${v.toFixed(2)}, grading fees exceed upside.</div>`;
   }
 
+  const ebayKw  = card._jp ? `${card.name} ${card.number} japanese pokemon` : `${card.name} ${card.number} pokemon`;
+  const ebayUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(ebayKw)}` + (card._jp ? '&LH_Sold=1&LH_Complete=1' : '');
   html += `<div style="margin-top:16px">
     <button class="btn btn-primary" onclick="showTab('condition')">🔬 Assess Condition</button>
-    <button class="btn btn-secondary" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(card.name + ' ' + card.number + ' pokemon')}','_blank')">See on eBay →</button>
+    <button class="btn btn-secondary" onclick="window.open('${ebayUrl}','_blank')">${card._jp ? 'See sold on eBay →' : 'See on eBay →'}</button>
   </div>`;
 
   const el = document.getElementById('cardDetail');
@@ -654,6 +728,10 @@ function renderCondResult(a, marketVal, gradeCost) {
     html += `<div class="verdict v-red" style="margin-top:14px">📦 <b>Not recommended.</b> At grade ${grade}, grading fees likely exceed the value bump. Keep it in a top loader.</div>`;
   }
 
+  if (marketVal == null) {
+    html += `<div class="hint" style="margin-top:10px">⚠️ No price was available (e.g. a Japanese card), so this verdict is based on condition alone. Confirm the card's value on eBay sold listings before paying to grade — a high grade only pays off if the card itself is worth enough.</div>`;
+  }
+
   html += '</div>';
   document.getElementById('condResult').innerHTML = html;
   document.getElementById('condResult').scrollIntoView({ behavior: 'smooth' });
@@ -769,6 +847,7 @@ function getGradeCost() {
 
 // Init
 loadSettings();
+setLang(localStorage.getItem('card_lang') || 'en');
 </script>
 </body>
 </html>
