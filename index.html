@@ -181,7 +181,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v17</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v18</span></p>
 </div>
 
 <div class="nav">
@@ -225,7 +225,10 @@
       <button class="btn btn-secondary btn-sm" id="scanNameBtn" style="margin:0" onclick="captureAndRead('name')">🃏 Read name</button>
       <button class="btn btn-secondary btn-sm" style="margin:0" onclick="captureAndRead('number')">🔢 Read number</button>
     </div>
-    <button class="btn btn-secondary btn-sm" style="margin:0" onclick="stopScanCamera()">✖ Close camera</button>
+    <div style="display:flex; gap:8px">
+      <button class="btn btn-secondary btn-sm" id="torchBtn" style="margin:0; display:none" onclick="toggleTorch()">🔦 Light: off</button>
+      <button class="btn btn-secondary btn-sm" style="margin:0" onclick="stopScanCamera()">✖ Close camera</button>
+    </div>
   </div>
 
   <div id="searchResults"></div>
@@ -749,15 +752,43 @@ function renderCardDetail(card) {
 const NAME_REGION = { x: 0.14, y: 0.07, w: 0.72, h: 0.21 };
 const NUM_REGION  = { x: 0.14, y: 0.80, w: 0.72, h: 0.13 };
 
+let scanTrack = null, torchOn = false;
+
+// re-assert continuous autofocus after the stream is live (some devices ignore it in the initial request)
+async function sharpenFocus(track) {
+  try { await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch(e) {}
+}
+
+// show a flashlight toggle only if this camera supports torch (most modern Android rear cameras do)
+function setupTorch(track) {
+  const btn = document.getElementById('torchBtn');
+  torchOn = false; btn.textContent = '🔦 Light: off';
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
+  btn.style.display = caps.torch ? 'block' : 'none';
+}
+
+async function toggleTorch() {
+  if (!scanTrack) return;
+  torchOn = !torchOn;
+  try {
+    await scanTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+    document.getElementById('torchBtn').textContent = torchOn ? '🔦 Light: on' : '🔦 Light: off';
+  } catch(e) { torchOn = false; }
+}
+
 async function toggleScanCamera() {
   if (scanning) { stopScanCamera(); return; }
   const vid = document.getElementById('scanVideo');
   const btn = document.getElementById('scanToggleBtn');
   try {
     scanStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1920 }, advanced: [{ focusMode: 'continuous' }] }
+      video: { facingMode: 'environment', width: { ideal: 2560 }, height: { ideal: 1440 },
+               advanced: [{ focusMode: 'continuous' }, { exposureMode: 'continuous' }] }
     });
     vid.srcObject = scanStream; await vid.play();
+    scanTrack = scanStream.getVideoTracks()[0];
+    sharpenFocus(scanTrack);     // re-assert continuous focus (more reliable applied post-stream)
+    setupTorch(scanTrack);       // show flashlight toggle if the device supports it
     scanning = true;
     btn.textContent = '✖ Close';
     document.getElementById('findPanel').style.display = 'none';   // free up space for the camera
@@ -787,6 +818,8 @@ async function toggleScanCamera() {
 function stopScanCamera() {
   scanning = false;
   if (scanStream) scanStream.getTracks().forEach(t => t.stop());
+  scanTrack = null; torchOn = false;
+  document.getElementById('torchBtn').style.display = 'none';
   document.getElementById('findPanel').style.display = '';        // restore search inputs
   document.getElementById('scanWrap').style.display = 'none';
   const row = document.getElementById('scanCaptureRow');
@@ -930,12 +963,12 @@ async function aiScanCard() {
   const vw = vid.videoWidth, vh = vid.videoHeight;
   if (!vw || !vh) { status.textContent = 'Camera still warming up — try again in a sec'; return; }
 
-  // capture the full frame, downscaled to keep the request small/cheap
-  const scale = Math.min(1, 1024 / Math.max(vw, vh));
+  // capture the full frame at Claude's optimal max edge (1568px) for the sharpest read it can use
+  const scale = Math.min(1, 1568 / Math.max(vw, vh));
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(vw * scale); canvas.height = Math.round(vh * scale);
   canvas.getContext('2d').drawImage(vid, 0, 0, canvas.width, canvas.height);
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
   const base64 = dataUrl.split(',')[1];
   lastScanPhoto = dataUrl;   // reuse for one-tap grading
 
@@ -1051,7 +1084,7 @@ async function toggleCondCamera() {
   const btn = document.getElementById('condCamBtn');
   try {
     condStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+      video: { facingMode: 'environment', width: { ideal: 2560 }, height: { ideal: 1440 }, advanced: [{ focusMode: 'continuous' }] }
     });
     vid.srcObject = condStream; vid.style.display = 'block'; await vid.play();
     condCameraOn = true;
