@@ -115,11 +115,15 @@
   /* Scan video */
   .scan-wrap { position: relative; display: none; margin-bottom: 10px; overflow: hidden; border-radius: 14px; }
   #scanVideo { width: 100%; border-radius: 14px; display: block; background: #000; }
-  .scan-guide { position: absolute; left: 8%; right: 8%; top: 45%; height: 11%;
-    border: 2px solid #ffcb05; border-radius: 8px; pointer-events: none;
-    box-shadow: 0 0 0 2000px rgba(0,0,0,0.32); }
-  .scan-guide span { position: absolute; top: -24px; left: 0; right: 0; text-align: center;
-    color: #ffcb05; font-size: 12px; font-weight: 600; text-shadow: 0 1px 3px #000; }
+  /* card-shaped outline: line the whole card up inside it */
+  .card-outline { position: absolute; left: 14%; right: 14%; top: 7%; bottom: 7%;
+    border: 2px solid #ffcb05; border-radius: 10px; pointer-events: none;
+    box-shadow: 0 0 0 2000px rgba(0,0,0,0.40); }
+  .band { position: absolute; left: 0; right: 0; background: rgba(255,203,5,0.16);
+    color: #ffcb05; font-size: 10px; font-weight: 700; text-align: center; line-height: 1.1;
+    display: flex; align-items: center; justify-content: center; text-shadow: 0 1px 2px #000; }
+  .band-name { top: 0; height: 24%; border-bottom: 1px dashed #ffcb05; }
+  .band-num  { bottom: 0; height: 14%; border-top: 1px dashed #ffcb05; }
   .scanstatus { font-size: 13px; color: #ffcb05; text-align: center; min-height: 18px; margin-bottom: 6px; }
 
   /* Cond video / snapshot */
@@ -136,7 +140,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v12</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v13</span></p>
 </div>
 
 <div class="nav">
@@ -164,7 +168,10 @@
 
   <div class="scan-wrap" id="scanWrap">
     <video id="scanVideo" playsinline></video>
-    <div class="scan-guide"><span id="scanGuideLabel">Line up the name OR number in the box</span></div>
+    <div class="card-outline">
+      <div class="band band-name">🃏 card name</div>
+      <div class="band band-num">🔢 number</div>
+    </div>
   </div>
   <div id="scanCaptureRow" style="display:none; flex-direction:column; gap:8px">
     <button class="btn btn-primary" id="scanAiBtn" style="margin:0; display:none; background:linear-gradient(135deg,#a06bff 0%,#ff6bcb 100%); color:#fff" onclick="aiScanCard()">✨ AI scan — fit the whole card in view</button>
@@ -527,8 +534,10 @@ function renderCardDetail(card) {
 // ══════════════════════════════════════════════════════════
 //  Scan camera (number OCR)
 // ══════════════════════════════════════════════════════════
-// Guide-box region (fractions of the video frame) — MUST match .scan-guide CSS (left/top/width/height)
-const GUIDE = { x: 0.08, y: 0.45, w: 0.84, h: 0.11 };
+// Read regions (fractions of the video frame) — line the whole card up in the .card-outline (left14/top7/right14/bottom7).
+// Name = top band of the card (where the name is printed); Number = bottom band (collector number).
+const NAME_REGION = { x: 0.14, y: 0.07, w: 0.72, h: 0.21 };
+const NUM_REGION  = { x: 0.14, y: 0.80, w: 0.72, h: 0.13 };
 
 async function toggleScanCamera() {
   if (scanning) { stopScanCamera(); return; }
@@ -548,11 +557,11 @@ async function toggleScanCamera() {
     // name OCR is English-only; in JP mode offer number-scan only
     const jp = lang === 'jp';
     document.getElementById('scanNameBtn').style.display = jp ? 'none' : 'block';
-    document.getElementById('scanGuideLabel').textContent = jp ? 'Get close — fill the box with the number' : 'Get close — fill the box with the name OR number';
     document.getElementById('scanStatus').textContent = jp
-      ? 'Get close so the number fills the box, then tap Read number'
-      : 'Get close so just the name (or number) fills the box, then tap a button';
+      ? 'Line your whole card up in the box, then tap Read number'
+      : 'Line your whole card up in the box, then tap Read name or Read number';
     getOcrWorker().catch(() => {});   // warm up OCR in the background while they aim
+    getSpecies().catch(() => {});     // preload the Pokémon name list for matching
   } catch(e) {
     document.getElementById('scanStatus').textContent = 'Camera blocked — type the name or number instead';
   }
@@ -594,16 +603,17 @@ async function captureAndRead(mode) {
   const vw = vid.videoWidth, vh = vid.videoHeight;
   if (!vw || !vh) { status.textContent = 'Camera still warming up — try again in a sec'; return; }
 
-  // crop the guide region and upscale 3x for a sharp read
-  const sx = GUIDE.x * vw, sy = GUIDE.y * vh, sw = GUIDE.w * vw, sh = GUIDE.h * vh;
+  // crop the right band of the card outline (name=top, number=bottom) and upscale 3x
+  const R = mode === 'name' ? NAME_REGION : NUM_REGION;
+  const sx = R.x * vw, sy = R.y * vh, sw = R.w * vw, sh = R.h * vh;
   const canvas = document.createElement('canvas');
   canvas.width = sw * 3; canvas.height = sh * 3;
   canvas.getContext('2d').drawImage(vid, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
 
   status.textContent = mode === 'name' ? '🔎 Reading the name…' : '🔎 Reading the number…';
   try {
-    // single-line mode ('7') — the box should frame one line (the name or the number)
-    await worker.setParameters({ tessedit_char_whitelist: WHITELIST[mode], tessedit_pageseg_mode: '7' });
+    // single line for the number; sparse text ('11') for the name band (grabs the title among HP/stage text)
+    await worker.setParameters({ tessedit_char_whitelist: WHITELIST[mode], tessedit_pageseg_mode: mode === 'name' ? '11' : '7' });
     const { data: { text } } = await worker.recognize(canvas);
 
     if (mode === 'number') {
@@ -624,25 +634,66 @@ async function captureAndRead(mode) {
         status.textContent = "Couldn't read the full number — fill the box with just the number (e.g. 3/91), hold steady, tap again. Or tap 🃏 Read name / type it.";
       }
     } else {
-      // name: keep letters/spaces, collapse whitespace
-      const name = text.replace(/[^A-Za-z '.\-]/g, ' ').replace(/\s+/g, ' ').trim();
-      const words = name.split(' ').filter(Boolean).length;
-      // a real name is short — if we read a long blob, the box caught too much; refuse to search garbage
-      if (name.length >= 2 && name.length <= 22 && words <= 4) {
+      // snap the noisy OCR to the closest real Pokémon name so a slightly-off read still works
+      const species = await getSpecies().catch(() => null);
+      const cleaned = text.replace(/[^A-Za-z]+/g, ' ').replace(/\s+/g, ' ').trim();
+      const match = species ? bestSpeciesMatch(cleaned, species) : null;
+      const name = match || cleaned;
+      if (match || (name.length >= 3 && name.length <= 18 && !name.includes(' '))) {
         document.getElementById('searchName').value = name;
         document.getElementById('searchNum').value = '';   // fresh name lookup
         stopScanCamera();
         status.textContent = `Scanned name: ${name} ✓`;
         doSearch();
-      } else if (name.length > 22 || words > 4) {
-        status.textContent = "Read too much text — get closer so ONLY the name fills the box, then tap 🃏 Read name again.";
       } else {
-        status.textContent = "Couldn't read the name — fill the box with just the name, hold steady, tap again (or type it below).";
+        status.textContent = "Couldn't read the name — line the whole card up in the box (name at the top), hold steady, tap 🃏 Read name again. Or type it.";
       }
     }
   } catch(e) {
     status.textContent = 'Read failed — try again, or type it below.';
   }
+}
+
+// Pokémon species list (for snapping noisy OCR to a real name) — fetched once, cached on device
+let _species = null;
+async function getSpecies() {
+  if (_species) return _species;
+  const cached = localStorage.getItem('pokemon_species');
+  if (cached) { _species = JSON.parse(cached); return _species; }
+  const d = await fetch('https://pokeapi.co/api/v2/pokemon?limit=2000').then(r => r.json());
+  _species = d.results.map(r => r.name.replace(/-/g, ' ')).filter(n => n.length >= 3);
+  localStorage.setItem('pokemon_species', JSON.stringify(_species));
+  return _species;
+}
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    let cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = a[i-1] === b[j-1] ? prev[j-1] : 1 + Math.min(prev[j-1], prev[j], cur[j-1]);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+// Find the Pokémon name closest to the OCR text (whole string or any token)
+function bestSpeciesMatch(text, species) {
+  const clean = text.toLowerCase().replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return null;
+  const tokens = clean.split(' ').filter(t => t.length >= 4);
+  const cands = [clean, ...tokens];
+  let best = null, bestScore = 0;
+  for (const sp of species) {
+    for (const c of cands) {
+      const score = 1 - levenshtein(c, sp) / Math.max(c.length, sp.length);
+      if (score > bestScore) { bestScore = score; best = sp; }
+    }
+  }
+  return bestScore >= 0.7 ? best : null;   // require a fairly confident match
 }
 
 // ✨ Vision card-ID: photograph the whole card, let Claude identify it (English + Japanese)
