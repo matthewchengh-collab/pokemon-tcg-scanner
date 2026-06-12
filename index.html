@@ -110,7 +110,13 @@
   .check-opt.sel { background: rgba(255,203,5,0.2); border-color: #ffcb05; color: #ffcb05; }
 
   /* Scan video */
-  #scanVideo { width: 100%; border-radius: 14px; display: none; background: #000; margin-bottom: 8px; }
+  .scan-wrap { position: relative; display: none; margin-bottom: 10px; overflow: hidden; border-radius: 14px; }
+  #scanVideo { width: 100%; border-radius: 14px; display: block; background: #000; }
+  .scan-guide { position: absolute; left: 12%; right: 12%; top: 42%; height: 16%;
+    border: 2px solid #ffcb05; border-radius: 8px; pointer-events: none;
+    box-shadow: 0 0 0 2000px rgba(0,0,0,0.32); }
+  .scan-guide span { position: absolute; top: -24px; left: 0; right: 0; text-align: center;
+    color: #ffcb05; font-size: 12px; font-weight: 600; text-shadow: 0 1px 3px #000; }
   .scanstatus { font-size: 13px; color: #ffcb05; text-align: center; min-height: 18px; margin-bottom: 6px; }
 
   /* Cond video / snapshot */
@@ -153,7 +159,11 @@
     </div>
   </div>
 
-  <video id="scanVideo" playsinline></video>
+  <div class="scan-wrap" id="scanWrap">
+    <video id="scanVideo" playsinline></video>
+    <div class="scan-guide"><span>Line up the number inside the box</span></div>
+  </div>
+  <button class="btn btn-primary" id="scanCaptureBtn" style="display:none" onclick="captureAndRead()">📸 Capture &amp; read</button>
   <div class="scanstatus" id="scanStatus"></div>
 
   <div id="searchResults"></div>
@@ -460,27 +470,38 @@ function renderCardDetail(card) {
 // ══════════════════════════════════════════════════════════
 //  Scan camera (number OCR)
 // ══════════════════════════════════════════════════════════
+// Guide-box region (fractions of the video frame) — MUST match .scan-guide CSS (left/top/width/height)
+const GUIDE = { x: 0.12, y: 0.42, w: 0.76, h: 0.16 };
+
 async function toggleScanCamera() {
   if (scanning) { stopScanCamera(); return; }
   const vid = document.getElementById('scanVideo');
   const btn = document.getElementById('scanToggleBtn');
   try {
-    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-    vid.srcObject = scanStream; vid.style.display = 'block'; await vid.play();
-    scanning = true; btn.textContent = '✖ Stop';
-    document.getElementById('scanStatus').textContent = 'Point at the card number (bottom corner)…';
-    runScanLoop();
+    scanStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, advanced: [{ focusMode: 'continuous' }] }
+    });
+    vid.srcObject = scanStream; await vid.play();
+    scanning = true;
+    btn.textContent = '✖ Close';
+    document.getElementById('scanWrap').style.display = 'block';
+    document.getElementById('scanCaptureBtn').style.display = 'block';
+    document.getElementById('scanStatus').textContent = 'Line up the number in the box, then tap Capture';
+    getOcrWorker().catch(() => {});   // warm up OCR in the background while they aim
   } catch(e) {
     document.getElementById('scanStatus').textContent = 'Camera blocked — type the number instead';
   }
 }
+
 function stopScanCamera() {
   scanning = false;
   if (scanStream) scanStream.getTracks().forEach(t => t.stop());
-  document.getElementById('scanVideo').style.display = 'none';
+  document.getElementById('scanWrap').style.display = 'none';
+  document.getElementById('scanCaptureBtn').style.display = 'none';
   document.getElementById('scanToggleBtn').textContent = '📷 Scan #';
   document.getElementById('scanStatus').textContent = '';
 }
+
 let ocrWorker = null;
 
 async function getOcrWorker() {
@@ -492,43 +513,39 @@ async function getOcrWorker() {
   return ocrWorker;
 }
 
-async function runScanLoop() {
+// Read ONLY the pixels inside the guide box — what you aim at is what it reads
+async function captureAndRead() {
+  if (!scanning) return;
   let worker;
-  try {
-    worker = await getOcrWorker();
-  } catch(e) {
-    document.getElementById('scanStatus').textContent = e.message + ' — type the number instead';
-    return;
-  }
-  if (!scanning) return;   // user stopped while OCR was loading
+  try { worker = await getOcrWorker(); }
+  catch(e) { document.getElementById('scanStatus').textContent = e.message + ' — type the number instead'; return; }
 
-  const canvas = document.createElement('canvas');
   const vid = document.getElementById('scanVideo');
+  const vw = vid.videoWidth, vh = vid.videoHeight;
+  if (!vw || !vh) { document.getElementById('scanStatus').textContent = 'Camera still warming up — try again in a sec'; return; }
 
-  while (scanning) {
-    try {
-      const vw = vid.videoWidth, vh = vid.videoHeight;
-      if (vw && vh) {
-        // Crop the bottom ~28% (where the "123/197" number is printed) and upscale 2x for sharper OCR
-        const cropH = Math.round(vh * 0.28);
-        canvas.width = vw * 2; canvas.height = cropH * 2;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(vid, 0, vh - cropH, vw, cropH, 0, 0, canvas.width, canvas.height);
+  // crop the guide region and upscale 3x for a sharp read
+  const sx = GUIDE.x * vw, sy = GUIDE.y * vh, sw = GUIDE.w * vw, sh = GUIDE.h * vh;
+  const canvas = document.createElement('canvas');
+  canvas.width = sw * 3; canvas.height = sh * 3;
+  canvas.getContext('2d').drawImage(vid, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
 
-        document.getElementById('scanStatus').textContent = '🔎 Reading the number…';
-        const { data: { text } } = await worker.recognize(canvas);
-        const m = text.match(/(\d{1,3})\s*\/\s*(\d{1,3})/);
-        if (m && scanning) {
-          document.getElementById('searchNum').value = m[1] + '/' + m[2];
-          stopScanCamera();
-          document.getElementById('scanStatus').textContent = `Scanned: ${m[1]}/${m[2]} ✓`;
-          doSearch();
-          return;
-        }
-        if (scanning) document.getElementById('scanStatus').textContent = 'Hold steady on the number (bottom corner)…';
-      }
-    } catch(e) {}
-    await new Promise(r => setTimeout(r, 400));
+  document.getElementById('scanStatus').textContent = '🔎 Reading…';
+  try {
+    const { data: { text } } = await worker.recognize(canvas);
+    // prefer the "123/197" form; fall back to the first standalone number
+    const m = text.match(/(\d{1,3})\s*\/\s*(\d{1,3})/) || text.match(/(\d{1,3})/);
+    if (m) {
+      const val = m[2] ? `${m[1]}/${m[2]}` : m[1];
+      document.getElementById('searchNum').value = val;
+      stopScanCamera();
+      document.getElementById('scanStatus').textContent = `Scanned: ${val} ✓`;
+      doSearch();
+    } else {
+      document.getElementById('scanStatus').textContent = "Couldn't read it — center the number in the box, hold steady, and tap Capture again (or type it below).";
+    }
+  } catch(e) {
+    document.getElementById('scanStatus').textContent = 'Read failed — try again, or type the number below.';
   }
 }
 
