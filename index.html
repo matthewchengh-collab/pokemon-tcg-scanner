@@ -303,14 +303,23 @@ async function doSearch() {
   if (lang === 'jp') { return doSearchJP(name, num); }
 
   try {
-    // card numbers are stored bare in the API ("4", not "004") — strip leading zeros
-    const cardNum = num.split('/')[0].replace(/^0+(?=\d)/, '');
+    // "003/091" → number 3, set size 91. Strip leading zeros; the denominator (set total) pins the set.
+    const parts   = num.split('/');
+    const cardNum = parts[0].replace(/^0+(?=\d)/, '');
+    const denom   = (parts[1] || '').replace(/[^0-9]/g, '');
+    const numQ    = denom ? `number:${cardNum} set.printedTotal:${denom}` : `number:${cardNum}`;
+
     let q = '';
-    if (name && num) q = `name:"${name}" number:${cardNum}`;
+    if (name && num) q = `name:"${name}" ${numQ}`;
     else if (name)   q = `name:"${name}"`;
-    else             q = `number:${cardNum}`;
+    else             q = numQ;
 
     let cards = await fetchCards(q, 20);
+
+    // if the set-size filter found nothing (secret rare, misread total), retry on number alone
+    if (!cards.length && denom && num) {
+      cards = await fetchCards(name ? `name:"${name}" number:${cardNum}` : `number:${cardNum}`, 20);
+    }
 
     // fuzzy fallback: wildcard search
     if (!cards.length && name) {
