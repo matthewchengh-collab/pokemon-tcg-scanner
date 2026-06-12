@@ -136,7 +136,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v7</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v8</span></p>
 </div>
 
 <div class="nav">
@@ -288,7 +288,7 @@ function setLang(l) {
   const hint = document.getElementById('searchHint');
   if (l === 'jp') {
     nameInput.placeholder = 'Japanese name (リザードン) — or just use the number';
-    hint.innerHTML = '🇯🇵 Scan or type the <b>number</b> (works best), then pick your card from the photos. English names won\'t match Japanese cards.';
+    hint.innerHTML = '🇯🇵 Type the <b>full number incl. total</b> (e.g. 3/165) for an exact match. English names won\'t match Japanese cards — use the number or paste the Japanese name.';
   } else {
     nameInput.placeholder = 'Card name — e.g. Charizard, Pikachu';
     hint.textContent = 'Name search finds all versions. Add a number to narrow down.';
@@ -340,25 +340,64 @@ async function doSearch() {
 }
 
 // ─── Japanese cards (TCGdex) ───
+let _jpSets = null;
+async function getJpSets() {
+  if (_jpSets) return _jpSets;
+  _jpSets = await fetch('https://api.tcgdex.net/v2/ja/sets').then(r => r.json());
+  return _jpSets;
+}
+
+function mapJP(brief, setName) {
+  return (brief || []).map(c => ({
+    _jp: true, id: c.id, name: c.name, number: c.localId,
+    rarity: '', set: { name: setName || '' },
+    images: { small: c.image ? c.image + '/low.webp' : null, large: c.image ? c.image + '/high.png' : null },
+    tcgplayer: null,
+  }));
+}
+
+function finishJP(cards) {
+  if (!cards.length) { setResults('<div class="err">No Japanese cards found. Try the number with its total (e.g. 3/165), or paste the Japanese name.</div>'); return; }
+  const capped = cards.slice(0, 40);
+  _searchCards = capped;
+  if (capped.length === 1) { selectCardJP(capped[0]); return; }
+  renderResultsList(capped);
+}
+
 async function doSearchJP(name, num) {
   try {
-    let url;
-    if (name) url = `${JPAPI}?name=${encodeURIComponent(name)}`;
-    else      url = `${JPAPI}?localId=${encodeURIComponent(num.split('/')[0].replace(/^0+(?=\d)/, ''))}`;
+    if (name) {
+      const brief = await fetch(`${JPAPI}?name=${encodeURIComponent(name)}`).then(r => r.json());
+      return finishJP(mapJP(brief));
+    }
 
-    const brief = await fetch(url).then(r => r.json());
-    const cards = (brief || []).map(c => ({
-      _jp: true, id: c.id, name: c.name, number: c.localId,
-      rarity: '', set: { name: '' },
-      images: { small: c.image ? c.image + '/low.webp' : null, large: c.image ? c.image + '/high.png' : null },
-      tcgplayer: null,
-    }));
+    // number search: "003/165" → number 3, set total 165
+    const parts   = num.split('/');
+    const cardNum = parseInt(parts[0].replace(/[^0-9]/g, ''), 10);
+    const denom   = parseInt((parts[1] || '').replace(/[^0-9]/g, ''), 10);
 
-    if (!cards.length) { setResults('<div class="err">No Japanese cards found. Try the number, or paste the Japanese name.</div>'); return; }
-    const capped = cards.slice(0, 40);   // cap; pick visually from photos
-    _searchCards = capped;
-    if (capped.length === 1) { selectCardJP(capped[0]); return; }
-    renderResultsList(capped);
+    // With a total: find the set(s) of that size, then pull the EXACT card (avoids the substring-match noise)
+    if (denom) {
+      const sets = await getJpSets();
+      const matchSets = sets.filter(s => s.cardCount && (s.cardCount.official === denom || s.cardCount.total === denom)).slice(0, 10);
+      const details = await Promise.all(matchSets.map(s => fetch(`https://api.tcgdex.net/v2/ja/sets/${s.id}`).then(r => r.json()).catch(() => null)));
+      const found = [];
+      details.forEach(d => {
+        if (!d || !d.cards) return;
+        const hits = d.cards.filter(c => parseInt(String(c.localId).replace(/[^0-9]/g, ''), 10) === cardNum);
+        found.push(...mapJP(hits, d.name).map(card => {
+          card.set.printedTotal = d.cardCount?.official || '';
+          return card;
+        }));
+      });
+      if (found.length) return finishJP(found);
+      // fall through to broad search if the total matched nothing
+    }
+
+    // No total (or none matched): broad substring search, capped — user picks from photos
+    const bare = parts[0].replace(/^0+(?=\d)/, '');
+    const brief = await fetch(`${JPAPI}?localId=${encodeURIComponent(bare)}`).then(r => r.json());
+    finishJP(mapJP(brief));
   } catch(e) {
     setResults('<div class="err">Japanese search failed — check your connection and try again.</div>');
   }
