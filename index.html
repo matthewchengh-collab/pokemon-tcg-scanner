@@ -143,6 +143,12 @@
     background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; font-size: 28px; }
   .hist-name { font-size: 11px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hist-val { font-size: 12px; font-weight: 700; color: #7CFFB2; }
+  /* pinned capture controls so the scan buttons are always reachable (no scrolling) */
+  #scanCaptureRow.fixed { position: fixed; left: 0; right: 0; bottom: 0; z-index: 100;
+    padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
+    background: rgba(26,28,46,0.97); backdrop-filter: blur(8px);
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.45); }
+  #page-search.scanning { padding-bottom: 200px; }   /* keep video clear of the pinned bar */
   .scanstatus { font-size: 13px; color: #ffcb05; text-align: center; min-height: 18px; margin-bottom: 6px; }
 
   /* Cond video / snapshot */
@@ -159,7 +165,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v14</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v15</span></p>
 </div>
 
 <div class="nav">
@@ -170,7 +176,7 @@
 
 <!-- ─── SEARCH TAB ─── -->
 <div class="page active" id="page-search">
-  <div class="panel">
+  <div class="panel" id="findPanel">
     <div class="sec">Find a Card</div>
     <div class="lang-toggle">
       <button class="lang-btn active" id="langEn" onclick="setLang('en')">🇺🇸 English</button>
@@ -195,13 +201,14 @@
     <div id="scanSpinner"><div class="spinner"></div><div id="scanSpinnerText">✨ Identifying…</div></div>
   </div>
   <div id="scanCaptureRow" style="display:none; flex-direction:column; gap:8px">
+    <div class="scanstatus" id="scanStatus" style="margin:0 0 2px"></div>
     <button class="btn btn-primary" id="scanAiBtn" style="margin:0; display:none; background:linear-gradient(135deg,#a06bff 0%,#ff6bcb 100%); color:#fff" onclick="aiScanCard()">✨ AI scan — fit the whole card in view</button>
     <div style="display:flex; gap:8px">
       <button class="btn btn-secondary btn-sm" id="scanNameBtn" style="margin:0" onclick="captureAndRead('name')">🃏 Read name</button>
       <button class="btn btn-secondary btn-sm" style="margin:0" onclick="captureAndRead('number')">🔢 Read number</button>
     </div>
+    <button class="btn btn-secondary btn-sm" style="margin:0" onclick="stopScanCamera()">✖ Close camera</button>
   </div>
-  <div class="scanstatus" id="scanStatus"></div>
 
   <div id="searchResults"></div>
   <div id="cardDetail"></div>
@@ -625,8 +632,13 @@ async function toggleScanCamera() {
     vid.srcObject = scanStream; await vid.play();
     scanning = true;
     btn.textContent = '✖ Close';
+    document.getElementById('findPanel').style.display = 'none';   // free up space for the camera
     document.getElementById('scanWrap').style.display = 'block';
-    document.getElementById('scanCaptureRow').style.display = 'flex';
+    const row = document.getElementById('scanCaptureRow');
+    row.style.display = 'flex';
+    row.classList.add('fixed');                                    // pin controls to the bottom
+    document.getElementById('page-search').classList.add('scanning');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     // AI scan (whole card, EN+JP) available when an API key is saved
     document.getElementById('scanAiBtn').style.display = localStorage.getItem('anthropic_api_key') ? 'block' : 'none';
     // name OCR is English-only; in JP mode offer number-scan only
@@ -645,8 +657,12 @@ async function toggleScanCamera() {
 function stopScanCamera() {
   scanning = false;
   if (scanStream) scanStream.getTracks().forEach(t => t.stop());
+  document.getElementById('findPanel').style.display = '';        // restore search inputs
   document.getElementById('scanWrap').style.display = 'none';
-  document.getElementById('scanCaptureRow').style.display = 'none';
+  const row = document.getElementById('scanCaptureRow');
+  row.style.display = 'none';
+  row.classList.remove('fixed');
+  document.getElementById('page-search').classList.remove('scanning');
   document.getElementById('scanToggleBtn').textContent = '📷 Scan card';
   document.getElementById('scanStatus').textContent = '';
   // reset freeze overlay so the next open starts clean
