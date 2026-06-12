@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pokemon Card Scanner</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(160deg, #1a1c2e 0%, #2d1b4e 100%);
+    color: #fff; min-height: 100vh;
+  }
+  .header { padding: 18px 16px 0; text-align: center; }
+  .header h1 { font-size: 22px; margin-bottom: 2px; }
+  .header p  { font-size: 13px; color: #b8a9e0; margin-bottom: 14px; }
+
+  /* Nav */
+  .nav { display: flex; background: rgba(0,0,0,0.3); border-bottom: 1px solid rgba(255,255,255,0.1); }
+  .nav-tab { flex: 1; padding: 14px 8px; text-align: center; font-size: 13px; font-weight: 600; color: #8a7fb0; cursor: pointer; border-bottom: 3px solid transparent; }
+  .nav-tab.active { color: #ffcb05; border-bottom-color: #ffcb05; }
+
+  /* Pages */
+  .page { display: none; padding: 16px; }
+  .page.active { display: block; }
+
+  /* Panels */
+  .panel { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 16px; margin-bottom: 14px; }
+
+  /* Buttons */
+  .btn { width: 100%; padding: 15px; font-size: 16px; font-weight: 700; border: none; border-radius: 14px; cursor: pointer; margin-bottom: 10px; }
+  .btn:last-child { margin-bottom: 0; }
+  .btn:active { transform: scale(0.98); }
+  .btn-primary { background: linear-gradient(135deg, #ffcb05 0%, #ff9500 100%); color: #1a1c2e; }
+  .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); }
+  .btn-sm { padding: 10px 16px; font-size: 14px; width: auto; margin: 0; }
+
+  /* Inputs */
+  input, textarea {
+    width: 100%; padding: 13px; border-radius: 11px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(0,0,0,0.3); color: #fff; font-size: 16px; margin-bottom: 10px;
+  }
+  input::placeholder { color: #8a7fb0; }
+
+  /* Section label */
+  .sec { font-size: 12px; font-weight: 700; color: #b8a9e0; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px; }
+  .hint { font-size: 12px; color: #8a7fb0; line-height: 1.5; }
+  .divider { height: 1px; background: rgba(255,255,255,0.08); margin: 14px 0; }
+
+  /* Search results list */
+  .result-item { display: flex; align-items: center; gap: 12px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 12px; margin-bottom: 8px; cursor: pointer; border: 1px solid transparent; }
+  .result-item:active { background: rgba(255,203,5,0.1); border-color: rgba(255,203,5,0.3); }
+  .result-item img { width: 44px; border-radius: 6px; flex-shrink: 0; }
+  .result-thumb { width: 44px; height: 60px; background: rgba(255,255,255,0.05); border-radius: 6px; flex-shrink: 0; }
+  .result-info { flex: 1; min-width: 0; }
+  .result-name { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .result-sub  { font-size: 12px; color: #b8a9e0; margin-top: 2px; }
+  .result-price { font-weight: 700; color: #7CFFB2; font-size: 14px; flex-shrink: 0; }
+
+  /* Card detail */
+  .card-img-lg { width: 55%; max-width: 220px; display: block; margin: 0 auto 16px; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.6); }
+  .card-title  { font-size: 22px; font-weight: 800; text-align: center; margin-bottom: 4px; }
+  .card-sub    { text-align: center; color: #b8a9e0; font-size: 13px; margin-bottom: 16px; }
+  .price-row   { display: flex; justify-content: space-between; align-items: center; padding: 10px 4px; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 14px; }
+  .price-row:last-child { border-bottom: none; }
+  .price-val   { font-weight: 700; color: #7CFFB2; }
+
+  /* Verdict banners */
+  .verdict { margin-top: 14px; padding: 13px; border-radius: 13px; font-size: 13px; line-height: 1.6; }
+  .v-green  { background: rgba(124,255,178,0.12); border: 1px solid rgba(124,255,178,0.4); }
+  .v-yellow { background: rgba(255,203,5,0.10);  border: 1px solid rgba(255,203,5,0.35); }
+  .v-red    { background: rgba(255,138,138,0.10); border: 1px solid rgba(255,138,138,0.25); }
+
+  /* Condition tab */
+  .cond-header { display: flex; align-items: center; gap: 12px; }
+  .cond-header img { width: 60px; border-radius: 8px; }
+  .cond-header .info { flex: 1; }
+  .cond-header .name { font-weight: 800; font-size: 16px; }
+  .cond-header .meta { font-size: 12px; color: #b8a9e0; margin-top: 2px; }
+  .cond-header .price { font-size: 14px; color: #7CFFB2; font-weight: 700; margin-top: 3px; }
+
+  /* AI result */
+  .grade-num { font-size: 58px; font-weight: 900; line-height: 1; text-align: center; }
+  .grade-lbl { text-align: center; font-size: 18px; font-weight: 700; margin-top: 4px; }
+  .grade-conf { text-align: center; font-size: 12px; color: #b8a9e0; margin-top: 3px; margin-bottom: 14px; }
+  .tag { display: inline-block; padding: 5px 10px; border-radius: 20px; font-size: 12px; margin: 3px; }
+  .tag-bad  { background: rgba(255,138,138,0.15); border: 1px solid rgba(255,138,138,0.3); color: #ff8a8a; }
+  .tag-good { background: rgba(124,255,178,0.12); border: 1px solid rgba(124,255,178,0.3); color: #7CFFB2; }
+
+  /* ROI grid */
+  .roi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  .roi-box  { background: rgba(255,255,255,0.05); border-radius: 12px; padding: 12px; text-align: center; }
+  .roi-box .num { font-size: 20px; font-weight: 800; }
+  .roi-box .lbl { font-size: 11px; color: #b8a9e0; margin-top: 2px; }
+  .roi-pos .num { color: #7CFFB2; }
+  .roi-neg .num { color: #ff8a8a; }
+
+  /* Manual checklist */
+  .check-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.07); flex-wrap: wrap; gap: 8px; }
+  .check-opts { display: flex; gap: 5px; flex-wrap: wrap; }
+  .check-opt { padding: 6px 9px; border-radius: 8px; font-size: 11px; cursor: pointer; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1); }
+  .check-opt.sel { background: rgba(255,203,5,0.2); border-color: #ffcb05; color: #ffcb05; }
+
+  /* Scan video */
+  #scanVideo { width: 100%; border-radius: 14px; display: none; background: #000; margin-bottom: 8px; }
+  .scanstatus { font-size: 13px; color: #ffcb05; text-align: center; min-height: 18px; margin-bottom: 6px; }
+
+  /* Cond video / snapshot */
+  #condVideo    { width: 100%; border-radius: 14px; display: none; background: #000; margin-bottom: 10px; }
+  #condSnapshot { width: 100%; border-radius: 14px; display: none; margin-bottom: 10px; }
+  #condCanvas   { display: none; }
+
+  .loading { text-align: center; color: #b8a9e0; padding: 24px; }
+  .err { color: #ff8a8a; font-size: 14px; padding: 8px 0; }
+  .api-warn { background: rgba(255,203,5,0.1); border: 1px solid rgba(255,203,5,0.3); border-radius: 12px; padding: 12px; font-size: 13px; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>⚡ Pokémon Card Scanner</h1>
+  <p>Value lookup + grading analysis</p>
+</div>
+
+<div class="nav">
+  <div class="nav-tab active"  onclick="showTab('search')">🔍 Search</div>
+  <div class="nav-tab"         onclick="showTab('condition')">🔬 Condition</div>
+  <div class="nav-tab"         onclick="showTab('settings')">⚙️ Settings</div>
+</div>
+
+<!-- ─── SEARCH TAB ─── -->
+<div class="page active" id="page-search">
+  <div class="panel">
+    <div class="sec">Find a Card</div>
+    <input id="searchName" placeholder="Card name — e.g. Charizard, Pikachu" inputmode="search">
+    <input id="searchNum"  placeholder="Card number — e.g. 4/102 (optional)" inputmode="text" style="margin-bottom:6px">
+    <div class="hint" style="margin-bottom:10px">Name search finds all versions. Add a number to narrow down.</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" style="margin:0" onclick="doSearch()">Search</button>
+      <button class="btn btn-secondary btn-sm" id="scanToggleBtn" onclick="toggleScanCamera()">📷 Scan #</button>
+    </div>
+  </div>
+
+  <video id="scanVideo" playsinline></video>
+  <div class="scanstatus" id="scanStatus"></div>
+
+  <div id="searchResults"></div>
+  <div id="cardDetail"></div>
+</div>
+
+<!-- ─── CONDITION TAB ─── -->
+<div class="page" id="page-condition">
+
+  <div id="condEmpty" class="panel" style="text-align:center;padding:28px">
+    <div style="font-size:36px;margin-bottom:10px">🃏</div>
+    <div style="font-weight:700;margin-bottom:6px">No card selected</div>
+    <div class="hint">Search for a card first, then tap <b>Assess Condition</b>.</div>
+  </div>
+
+  <div id="condMain" style="display:none">
+    <div class="panel" id="condHeader"></div>
+
+    <div class="panel">
+      <div class="sec">Rate Each Category</div>
+      <div class="hint" style="margin-bottom:12px">Look at your card closely (hold it under good light, tilt it to catch scratches). Tap the best match for each.</div>
+      <div id="checklistBody"></div>
+      <button class="btn btn-primary" style="margin-top:14px" onclick="calcManualGrade()">Calculate Grade →</button>
+
+      <div class="divider"></div>
+      <button class="btn btn-secondary" onclick="toggleAI()">📷 Use AI Photo Analysis instead</button>
+
+      <div id="aiSection" style="display:none">
+        <div class="divider"></div>
+        <div class="sec">AI Photo Analysis</div>
+        <div id="condAIArea">
+          <div class="hint" style="margin-bottom:10px">Take a photo of your card (good lighting, front side). Claude AI rates corners, edges, surface, and centering. Requires an API key (Settings).</div>
+          <video id="condVideo" playsinline></video>
+          <img id="condSnapshot" alt="Card photo">
+          <canvas id="condCanvas"></canvas>
+          <button class="btn btn-primary" id="condCamBtn" onclick="toggleCondCamera()">📷 Take Photo</button>
+          <button class="btn btn-primary" id="condAnalyzeBtn" style="display:none" onclick="analyzeCondition()">✨ Analyze with AI</button>
+          <div class="scanstatus" id="condStatus"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="condResult"></div>
+  </div>
+
+</div>
+
+<!-- ─── SETTINGS TAB ─── -->
+<div class="page" id="page-settings">
+  <div class="panel">
+    <div class="sec">Claude AI (for photo analysis)</div>
+    <div class="hint" style="margin-bottom:10px">Get a free API key at <b>console.anthropic.com</b>. Stored only on this device.</div>
+    <input id="apiKeyInput" type="password" placeholder="sk-ant-api03-…" style="font-family:monospace">
+    <button class="btn btn-primary" onclick="saveApiKey()">Save Key</button>
+    <div id="apiKeyMsg" class="hint" style="margin-top:4px"></div>
+  </div>
+
+  <div class="panel">
+    <div class="sec">Grading Fee</div>
+    <div class="hint" style="margin-bottom:8px">Used in ROI calculations.</div>
+    <input id="psaCostInput" type="number" placeholder="20" value="20" style="margin-bottom:0">
+    <div class="hint" style="margin-top:4px">PSA Value: ~$20 · Regular: ~$50 · BGS: ~$25</div>
+  </div>
+
+  <div class="panel">
+    <div class="sec">About</div>
+    <div style="font-size:13px;color:#b8a9e0;line-height:1.7">
+      Prices from <b>TCGPlayer</b> via pokemontcg.io.<br>
+      Condition analysis via <b>Claude Haiku</b> (Anthropic).<br>
+      ROI uses rough multipliers: PSA 10 ≈ 8×, PSA 9 ≈ 2.5×, PSA 8 ≈ 1.3×.<br>
+      Grading ROI estimates are for guidance only.
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════
+//  State
+// ══════════════════════════════════════════════════════════
+const TCGAPI = 'https://api.pokemontcg.io/v2/cards';
+let currentCard  = null;
+let scanStream   = null, scanning = false;
+let condStream   = null, condCameraOn = false, condPhoto = null;
+let checkState   = {};   // manual checklist selections
+let _searchCards = [];
+
+const CHECKLIST = [
+  { id:'corners',  label:'Corners',       opts:['Sharp/Mint','Light wear','Moderate','Heavy wear'],  scores:[10,7,4,1] },
+  { id:'edges',    label:'Edges',         opts:['Clean',     'Minor nicks','Worn',    'Chipped'],     scores:[10,7,4,1] },
+  { id:'surface',  label:'Surface / Holo',opts:['No scratches','Minor scratches','Visible scratches','Heavy damage'], scores:[10,7,4,1] },
+  { id:'centering',label:'Centering',     opts:['Perfect','Slightly off','Off-center','Badly cut'],  scores:[10,8,5,2] },
+  { id:'print',    label:'Print Quality', opts:['Flawless','Minor dot','Print line','Defect'],        scores:[10,7,4,1] },
+];
+
+// ══════════════════════════════════════════════════════════
+//  Nav
+// ══════════════════════════════════════════════════════════
+function showTab(tab) {
+  document.querySelectorAll('.nav-tab').forEach((el, i) => {
+    el.classList.toggle('active', ['search','condition','settings'][i] === tab);
+  });
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + tab).classList.add('active');
+  if (tab === 'condition') renderCondTab();
+  if (tab === 'settings')  loadSettings();
+}
+
+// ══════════════════════════════════════════════════════════
+//  Search
+// ══════════════════════════════════════════════════════════
+async function doSearch() {
+  const name = document.getElementById('searchName').value.trim();
+  const num  = document.getElementById('searchNum').value.trim();
+  if (!name && !num) { setResults('<div class="err">Enter a card name or number.</div>'); return; }
+
+  setResults('<div class="loading">🔍 Searching…</div>');
+  document.getElementById('cardDetail').innerHTML = '';
+
+  try {
+    let q = '';
+    if (name && num) q = `name:"${name}" number:${num.split('/')[0]}`;
+    else if (name)   q = `name:"${name}"`;
+    else             q = `number:${num.split('/')[0]}`;
+
+    let cards = await fetchCards(q, 20);
+
+    // fuzzy fallback: wildcard search
+    if (!cards.length && name) {
+      cards = await fetchCards(`name:${encodeURIComponent(name)}*`, 20);
+    }
+
+    if (!cards.length) { setResults('<div class="err">No cards found. Try a different name.</div>'); return; }
+
+    if (cards.length === 1) { selectCard(cards[0]); return; }
+    renderResultsList(cards);
+  } catch(e) {
+    setResults('<div class="err">Search failed — check your connection and try again.</div>');
+  }
+}
+
+async function fetchCards(q, n) {
+  const r = await fetch(`${TCGAPI}?q=${encodeURIComponent(q)}&orderBy=-set.releaseDate&pageSize=${n}`);
+  const j = await r.json();
+  return j.data || [];
+}
+
+function setResults(html) { document.getElementById('searchResults').innerHTML = html; }
+
+function renderResultsList(cards) {
+  _searchCards = cards;
+  let html = `<div class="sec" style="padding:0 4px;margin-bottom:8px">${cards.length} results — tap a card</div>`;
+  cards.forEach((c, i) => {
+    const p = bestPrice(c);
+    const priceStr = p && p.market != null ? `$${p.market.toFixed(2)}` : '—';
+    const thumb = c.images?.small
+      ? `<img src="${c.images.small}" onerror="this.style.display='none'">`
+      : `<div class="result-thumb"></div>`;
+    html += `<div class="result-item" onclick="selectCardByIdx(${i})">
+      ${thumb}
+      <div class="result-info">
+        <div class="result-name">${c.name}</div>
+        <div class="result-sub">${c.set.name} · #${c.number} · ${c.rarity || 'Common'}</div>
+      </div>
+      <div class="result-price">${priceStr}</div>
+    </div>`;
+  });
+  setResults(html);
+}
+
+function selectCardByIdx(i) { selectCard(_searchCards[i]); }
+
+function selectCard(card) {
+  currentCard = card;
+  setResults('');
+  renderCardDetail(card);
+}
+
+function renderCardDetail(card) {
+  const p          = bestPrice(card);
+  const gradeCost  = getGradeCost();
+  const imgLarge   = card.images?.large;
+  const tp         = card.tcgplayer?.prices;
+
+  let html = '';
+  if (imgLarge) html += `<img class="card-img-lg" src="${imgLarge}" alt="${card.name}">`;
+  html += `<div class="card-title">${card.name}</div>`;
+  html += `<div class="card-sub">${card.set.name} · #${card.number}/${card.set.printedTotal || '?'} · ${card.rarity || ''}</div>`;
+
+  // Prices
+  if (tp && Object.keys(tp).length) {
+    html += `<div class="sec">TCGPlayer Prices</div>`;
+    const variantLabel = { normal:'Normal', holofoil:'Holofoil', reverseHolofoil:'Reverse Holo', '1stEditionHolofoil':'1st Ed Holo', unlimitedHolofoil:'Unlimited Holo' };
+    Object.entries(tp).forEach(([key, vals]) => {
+      if (!vals) return;
+      const lbl = variantLabel[key] || key;
+      const valid = v => v != null && v < 99999;   // TCGPlayer uses 99999 as a "no real data" placeholder
+      if (valid(vals.market)) html += `<div class="price-row"><span>${lbl} — Market</span><span class="price-val">$${vals.market.toFixed(2)}</span></div>`;
+      if (valid(vals.low))    html += `<div class="price-row"><span>${lbl} — Low</span>   <span class="price-val">$${vals.low.toFixed(2)}</span></div>`;
+      if (valid(vals.high))   html += `<div class="price-row"><span>${lbl} — High</span>  <span class="price-val">$${vals.high.toFixed(2)}</span></div>`;
+    });
+  } else if (card.cardmarket?.prices) {
+    const cm = card.cardmarket.prices;
+    html += `<div class="sec">Cardmarket Prices</div>`;
+    if (cm.averageSellPrice) html += `<div class="price-row"><span>Avg sell</span><span class="price-val">€${cm.averageSellPrice.toFixed(2)}</span></div>`;
+    if (cm.trendPrice)       html += `<div class="price-row"><span>Trend</span>   <span class="price-val">€${cm.trendPrice.toFixed(2)}</span></div>`;
+  } else {
+    html += '<div class="hint" style="margin:12px 0">No price data. Check eBay below.</div>';
+  }
+
+  // Quick grading hint (price only)
+  if (p && p.market != null) {
+    const v = p.market;
+    if (v >= 25) html += `<div class="verdict v-green">💎 <b>Possibly worth grading</b> — $${v.toFixed(2)} raw. Tap Condition to check your copy.</div>`;
+    else if (v >= 8) html += `<div class="verdict v-yellow">🤔 <b>Maybe</b> — at $${v.toFixed(2)}, only worth grading if it's near-perfect.</div>`;
+    else html += `<div class="verdict v-red">📦 <b>Not worth grading</b> — at $${v.toFixed(2)}, grading fees exceed upside.</div>`;
+  }
+
+  html += `<div style="margin-top:16px">
+    <button class="btn btn-primary" onclick="showTab('condition')">🔬 Assess Condition</button>
+    <button class="btn btn-secondary" onclick="window.open('https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(card.name + ' ' + card.number + ' pokemon')}','_blank')">See on eBay →</button>
+  </div>`;
+
+  const el = document.getElementById('cardDetail');
+  el.innerHTML = `<div class="panel">${html}</div>`;
+  el.scrollIntoView({ behavior: 'smooth' });
+}
+
+// ══════════════════════════════════════════════════════════
+//  Scan camera (number OCR)
+// ══════════════════════════════════════════════════════════
+async function toggleScanCamera() {
+  if (scanning) { stopScanCamera(); return; }
+  const vid = document.getElementById('scanVideo');
+  const btn = document.getElementById('scanToggleBtn');
+  try {
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    vid.srcObject = scanStream; vid.style.display = 'block'; await vid.play();
+    scanning = true; btn.textContent = '✖ Stop';
+    document.getElementById('scanStatus').textContent = 'Point at the card number (bottom corner)…';
+    runScanLoop();
+  } catch(e) {
+    document.getElementById('scanStatus').textContent = 'Camera blocked — type the number instead';
+  }
+}
+function stopScanCamera() {
+  scanning = false;
+  if (scanStream) scanStream.getTracks().forEach(t => t.stop());
+  document.getElementById('scanVideo').style.display = 'none';
+  document.getElementById('scanToggleBtn').textContent = '📷 Scan #';
+  document.getElementById('scanStatus').textContent = '';
+}
+async function runScanLoop() {
+  if (!window.TextDetector) {
+    document.getElementById('scanStatus').textContent = 'Auto-scan unavailable on this device — type the number';
+    return;
+  }
+  const detector = new TextDetector();
+  const canvas = document.createElement('canvas');
+  const vid = document.getElementById('scanVideo');
+  while (scanning) {
+    try {
+      canvas.width = vid.videoWidth; canvas.height = vid.videoHeight;
+      canvas.getContext('2d').drawImage(vid, 0, 0);
+      const texts = await detector.detect(canvas);
+      for (const t of texts) {
+        const m = t.rawValue.match(/(\d{1,3})\s*\/\s*(\d{1,3})/);
+        if (m) {
+          document.getElementById('searchNum').value = m[0];
+          stopScanCamera();
+          document.getElementById('scanStatus').textContent = `Scanned: ${m[0]}`;
+          doSearch();
+          return;
+        }
+      }
+    } catch(e) {}
+    await new Promise(r => setTimeout(r, 700));
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  Condition Tab
+// ══════════════════════════════════════════════════════════
+function renderCondTab() {
+  if (!currentCard) {
+    document.getElementById('condEmpty').style.display = 'block';
+    document.getElementById('condMain').style.display  = 'none';
+    return;
+  }
+  document.getElementById('condEmpty').style.display = 'none';
+  document.getElementById('condMain').style.display  = 'block';
+
+  const p = bestPrice(currentCard);
+  const img = currentCard.images?.small;
+  document.getElementById('condHeader').innerHTML = `<div class="cond-header">
+    ${img ? `<img src="${img}" alt="${currentCard.name}">` : ''}
+    <div class="info">
+      <div class="name">${currentCard.name}</div>
+      <div class="meta">${currentCard.set.name} · #${currentCard.number}</div>
+      ${p && p.market != null ? `<div class="price">$${p.market.toFixed(2)} market</div>` : ''}
+    </div>
+  </div>`;
+
+  renderChecklist();
+}
+
+// ══════════════════════════════════════════════════════════
+//  Condition Camera
+// ══════════════════════════════════════════════════════════
+async function toggleCondCamera() {
+  if (condCameraOn) { captureCondPhoto(); return; }
+  const vid = document.getElementById('condVideo');
+  const btn = document.getElementById('condCamBtn');
+  try {
+    condStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+    });
+    vid.srcObject = condStream; vid.style.display = 'block'; await vid.play();
+    condCameraOn = true;
+    btn.textContent = '📸 Capture Photo';
+    document.getElementById('condStatus').textContent = 'Fill the frame with the card front, good lighting…';
+  } catch(e) {
+    document.getElementById('condStatus').textContent = 'Camera blocked — use manual checklist instead';
+  }
+}
+function captureCondPhoto() {
+  const vid    = document.getElementById('condVideo');
+  const canvas = document.getElementById('condCanvas');
+  canvas.width = vid.videoWidth; canvas.height = vid.videoHeight;
+  canvas.getContext('2d').drawImage(vid, 0, 0);
+  condPhoto = canvas.toDataURL('image/jpeg', 0.85);
+
+  if (condStream) condStream.getTracks().forEach(t => t.stop());
+  vid.style.display = 'none';
+  const snap = document.getElementById('condSnapshot');
+  snap.src = condPhoto; snap.style.display = 'block';
+  condCameraOn = false;
+
+  document.getElementById('condCamBtn').textContent = '🔄 Retake';
+  document.getElementById('condAnalyzeBtn').style.display = 'block';
+  document.getElementById('condStatus').textContent = 'Photo ready — tap Analyze to assess condition.';
+}
+
+// ══════════════════════════════════════════════════════════
+//  AI Analysis (Claude Vision)
+// ══════════════════════════════════════════════════════════
+async function analyzeCondition() {
+  const apiKey = localStorage.getItem('anthropic_api_key');
+  if (!apiKey) { alert('Add your API key in Settings first.'); return; }
+  if (!condPhoto) { alert('Take a photo first.'); return; }
+
+  document.getElementById('condResult').innerHTML = '<div class="panel loading">✨ Analyzing card condition…</div>';
+  document.getElementById('condResult').scrollIntoView({ behavior: 'smooth' });
+
+  const base64     = condPhoto.split(',')[1];
+  const gradeCost  = getGradeCost();
+  const cardName   = currentCard ? currentCard.name : 'Pokemon card';
+  const p          = bestPrice(currentCard);
+  const marketVal  = p?.market ?? null;
+
+  const prompt = `You are a professional Pokemon card grader with deep expertise in PSA, BGS, and CGC grading standards. Analyze this Pokemon card image for "${cardName}".
+
+Assess all five grading dimensions:
+1. CORNERS — Check all 4 corners for sharpness, rounding, fraying, or whitening
+2. EDGES — Check all 4 edges for nicks, chips, whitening, or roughness
+3. SURFACE — Scratches, scuffs, holo damage, fingerprints, print lines on the front face
+4. CENTERING — Border balance left/right and top/bottom (PSA 10 requires 55/45 or better, PSA 9 allows 60/40)
+5. PRINT DEFECTS — Factory ink spots, color bleed, rosette misalignment, stains
+
+Grading scale:
+- PSA 10 Gem Mint: Perfect in every way, ≤55/45 centering, zero defects
+- PSA 9 Mint: Nearly perfect, one tiny imperfection, ≤60/40 centering
+- PSA 8 NM-MT: Minor wear on two or fewer areas, slightly off-center
+- PSA 7 Near Mint: Light overall wear across multiple areas
+- PSA 6 and below: Clearly visible damage
+
+${marketVal != null ? `Raw market value: $${marketVal.toFixed(2)}. Grading fee: $${gradeCost}.` : ''}
+
+Reply ONLY with this JSON object, no markdown, no explanation outside the JSON:
+{"psa_estimate":9.5,"grade_label":"Mint-Gem Mint","summary":"2-3 sentence overall condition description","corners":"what you see","edges":"what you see","surface":"what you see","centering":"what you see","print_defects":"what you see","issues":["specific issue if any"],"positives":["specific strength"],"confidence":"high"}`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 800,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+            { type: 'text', text: prompt }
+          ]
+        }]
+      })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API error ${resp.status}`);
+    }
+
+    const data  = await resp.json();
+    const text  = data.content?.find(b => b.type === 'text')?.text || '';
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('Could not parse AI response');
+
+    const assessment = JSON.parse(match[0]);
+    renderCondResult(assessment, marketVal, gradeCost);
+
+  } catch(e) {
+    document.getElementById('condResult').innerHTML = `<div class="panel"><div class="err">
+      Analysis failed: ${e.message}<br><br>
+      Check your API key in Settings, then try again — or use the manual checklist instead.
+    </div></div>`;
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  Condition Result Renderer
+// ══════════════════════════════════════════════════════════
+function renderCondResult(a, marketVal, gradeCost) {
+  const grade    = parseFloat(a.psa_estimate) || 7;
+  const multMap  = [[10, 8], [9.5, 5], [9, 2.5], [8, 1.3], [0, 0.85]];
+  const mult     = (multMap.find(([floor]) => grade >= floor) || [0, 0.85])[1];
+  const gradedVal = marketVal != null ? marketVal * mult : null;
+  const profit    = gradedVal != null ? gradedVal - marketVal - gradeCost : null;
+  const gradeColor = grade >= 9 ? '#7CFFB2' : grade >= 7 ? '#ffcb05' : '#ff8a8a';
+
+  const isAI = a.confidence !== 'user-rated';
+  let html = '<div class="panel">';
+  html += `<div class="sec">${isAI ? 'AI Condition Report' : 'Condition Report'}</div>`;
+
+  // Grade badge
+  html += `<div class="grade-num" style="color:${gradeColor}">${grade}</div>`;
+  html += `<div class="grade-lbl">${a.grade_label || ''} · Est. PSA ${grade}</div>`;
+  html += `<div class="grade-conf">AI confidence: ${a.confidence || 'medium'}</div>`;
+
+  // Summary
+  html += `<div style="font-size:14px;line-height:1.65;color:#e0d8f0;margin-bottom:12px">${a.summary || ''}</div>`;
+
+  // Tags
+  const issues = a.issues || [];
+  const pos    = a.positives || [];
+  if (issues.length || pos.length) {
+    html += '<div style="margin-bottom:12px">';
+    issues.forEach(t => html += `<span class="tag tag-bad">⚠ ${t}</span>`);
+    pos.forEach(t    => html += `<span class="tag tag-good">✓ ${t}</span>`);
+    html += '</div>';
+  }
+
+  // Dimension breakdown
+  html += '<div class="divider"></div><div class="sec">Breakdown</div>';
+  [['Corners', a.corners], ['Edges', a.edges], ['Surface', a.surface], ['Centering', a.centering], ['Print', a.print_defects]].forEach(([k, v]) => {
+    if (!v) return;
+    html += `<div class="price-row"><span>${k}</span><span style="color:#e0d8f0;font-size:13px;max-width:60%;text-align:right">${v}</span></div>`;
+  });
+
+  // ROI
+  if (marketVal != null && gradedVal != null) {
+    html += '<div class="divider"></div><div class="sec">Grading ROI Estimate</div>';
+    html += '<div class="roi-grid">';
+    html += `<div class="roi-box"><div class="num">$${marketVal.toFixed(0)}</div><div class="lbl">Raw value</div></div>`;
+    html += `<div class="roi-box"><div class="num" style="color:#7CFFB2">$${gradedVal.toFixed(0)}</div><div class="lbl">Est. graded value</div></div>`;
+    html += `<div class="roi-box"><div class="num">$${gradeCost}</div><div class="lbl">Grading fee</div></div>`;
+    const cls = profit >= 0 ? 'roi-pos' : 'roi-neg';
+    html += `<div class="roi-box ${cls}"><div class="num">${profit >= 0 ? '+' : ''}$${profit.toFixed(0)}</div><div class="lbl">Est. net gain</div></div>`;
+    html += '</div>';
+  }
+
+  // Final verdict
+  const worth = grade >= 9 && (profit == null || profit > 0);
+  const maybe = grade >= 8 && (profit == null || profit > -15);
+  if (worth) {
+    html += `<div class="verdict v-green" style="margin-top:14px">💎 <b>Looks worth grading!</b> PSA ${grade} condition with an estimated net gain${profit != null ? ` of $${profit.toFixed(0)}` : ''}. Submit it.</div>`;
+  } else if (maybe) {
+    html += `<div class="verdict v-yellow" style="margin-top:14px">🤔 <b>Borderline.</b> Grade ${grade} — check the issues above closely in hand. It might make PSA 9 but it's not a lock.</div>`;
+  } else {
+    html += `<div class="verdict v-red" style="margin-top:14px">📦 <b>Not recommended.</b> At grade ${grade}, grading fees likely exceed the value bump. Keep it in a top loader.</div>`;
+  }
+
+  html += '</div>';
+  document.getElementById('condResult').innerHTML = html;
+  document.getElementById('condResult').scrollIntoView({ behavior: 'smooth' });
+}
+
+// ══════════════════════════════════════════════════════════
+//  Manual Checklist
+// ══════════════════════════════════════════════════════════
+function toggleAI() {
+  const el = document.getElementById('aiSection');
+  const show = el.style.display === 'none';
+  el.style.display = show ? 'block' : 'none';
+  if (show && !localStorage.getItem('anthropic_api_key')) {
+    document.getElementById('condAIArea').insertAdjacentHTML('afterbegin', `<div class="api-warn" id="aiKeyWarn">
+      ⚠️ <b>No API key saved.</b> The manual checklist above works without one. AI photo analysis needs a Claude key (Settings).
+    </div>`);
+  }
+}
+
+function renderChecklist() {
+  let html = '';
+  CHECKLIST.forEach(item => {
+    html += `<div class="check-row">
+      <span style="font-size:14px;font-weight:600">${item.label}</span>
+      <div class="check-opts">`;
+    item.opts.forEach((opt, i) => {
+      const isSel = checkState[item.id] === i;
+      html += `<div class="check-opt${isSel ? ' sel' : ''}" onclick="pickCheck('${item.id}',${i})">${opt}</div>`;
+    });
+    html += '</div></div>';
+  });
+  document.getElementById('checklistBody').innerHTML = html;
+}
+
+function pickCheck(id, idx) {
+  checkState[id] = idx;
+  renderChecklist();
+}
+
+function calcManualGrade() {
+  const missing = CHECKLIST.filter(c => checkState[c.id] === undefined);
+  if (missing.length) { alert(`Please rate all categories (missing: ${missing.map(c => c.label).join(', ')})`); return; }
+
+  let total = 0;
+  CHECKLIST.forEach(c => { total += c.scores[checkState[c.id]]; });
+  const avg = total / CHECKLIST.length;
+
+  const psa = avg >= 9.8 ? 10 : avg >= 9.0 ? 9.5 : avg >= 8.2 ? 9 : avg >= 7.2 ? 8 : avg >= 6 ? 7 : avg >= 4 ? 6 : 5;
+  const lbl = {10:'Gem Mint', 9.5:'Mint-Gem Mint', 9:'Mint', 8:'NM-MT', 7:'Near Mint', 6:'Ex-MT', 5:'Excellent'}[psa] || 'Good';
+
+  const assessment = {
+    psa_estimate:  psa,
+    grade_label:   lbl,
+    summary:       `Manual assessment based on ${CHECKLIST.length} graded categories. Overall score: ${avg.toFixed(1)}/10.`,
+    confidence:    'user-rated',
+    corners:       CHECKLIST[0].opts[checkState['corners']],
+    edges:         CHECKLIST[1].opts[checkState['edges']],
+    surface:       CHECKLIST[2].opts[checkState['surface']],
+    centering:     CHECKLIST[3].opts[checkState['centering']],
+    print_defects: CHECKLIST[4].opts[checkState['print']],
+    issues:    CHECKLIST.filter(c => checkState[c.id] >= 2).map(c => `${c.label}: ${c.opts[checkState[c.id]]}`),
+    positives: CHECKLIST.filter(c => checkState[c.id] === 0).map(c => `${c.label}: ${c.opts[0]}`),
+  };
+
+  const p = bestPrice(currentCard);
+  renderCondResult(assessment, p?.market ?? null, getGradeCost());
+}
+
+// ══════════════════════════════════════════════════════════
+//  Settings
+// ══════════════════════════════════════════════════════════
+function loadSettings() {
+  const key = localStorage.getItem('anthropic_api_key');
+  if (key) {
+    document.getElementById('apiKeyInput').value = key;
+    document.getElementById('apiKeyMsg').textContent = '✓ API key saved';
+  }
+  const cost = localStorage.getItem('grading_cost');
+  if (cost) document.getElementById('psaCostInput').value = cost;
+
+  // Save cost on change
+  document.getElementById('psaCostInput').onchange = () => {
+    localStorage.setItem('grading_cost', document.getElementById('psaCostInput').value);
+  };
+}
+
+function saveApiKey() {
+  const key = document.getElementById('apiKeyInput').value.trim();
+  if (!key.startsWith('sk-ant-')) {
+    document.getElementById('apiKeyMsg').textContent = '⚠ Key should start with sk-ant-';
+    return;
+  }
+  localStorage.setItem('anthropic_api_key', key);
+  document.getElementById('apiKeyMsg').textContent = '✓ Saved!';
+}
+
+// ══════════════════════════════════════════════════════════
+//  Helpers
+// ══════════════════════════════════════════════════════════
+function bestPrice(card) {
+  if (!card) return null;
+  const tp = card.tcgplayer?.prices;
+  if (!tp) return null;
+  const order = ['holofoil','normal','reverseHolofoil','1stEditionHolofoil','unlimitedHolofoil'];
+  for (const k of order) if (tp[k]?.market != null) return { market: tp[k].market, low: tp[k].low, high: tp[k].high, variant: k };
+  const first = Object.keys(tp)[0];
+  return first ? { market: tp[first].market, low: tp[first].low, high: tp[first].high, variant: first } : null;
+}
+
+function getGradeCost() {
+  return parseFloat(document.getElementById('psaCostInput')?.value || localStorage.getItem('grading_cost') || 20);
+}
+
+// Init
+loadSettings();
+</script>
+</body>
+</html>
