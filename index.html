@@ -181,7 +181,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v16</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v17</span></p>
 </div>
 
 <div class="nav">
@@ -220,6 +220,7 @@
   <div id="scanCaptureRow" style="display:none; flex-direction:column; gap:8px">
     <div class="scanstatus" id="scanStatus" style="margin:0 0 2px"></div>
     <button class="btn btn-primary" id="scanAiBtn" style="margin:0; display:none; background:linear-gradient(135deg,#a06bff 0%,#ff6bcb 100%); color:#fff" onclick="aiScanCard()">✨ AI scan — fit the whole card in view</button>
+    <div class="hint" id="scanAiHint" style="display:none; text-align:center; margin:0">✨ Want one-tap AI scan? Add your API key in ⚙️ Settings on this phone.</div>
     <div style="display:flex; gap:8px">
       <button class="btn btn-secondary btn-sm" id="scanNameBtn" style="margin:0" onclick="captureAndRead('name')">🃏 Read name</button>
       <button class="btn btn-secondary btn-sm" style="margin:0" onclick="captureAndRead('number')">🔢 Read number</button>
@@ -766,8 +767,10 @@ async function toggleScanCamera() {
     row.classList.add('fixed');                                    // pin controls to the bottom
     document.getElementById('page-search').classList.add('scanning');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    // AI scan (whole card, EN+JP) available when an API key is saved
-    document.getElementById('scanAiBtn').style.display = localStorage.getItem('anthropic_api_key') ? 'block' : 'none';
+    // AI scan (whole card, EN+JP) available when an API key is saved; otherwise explain why it's missing
+    const hasKey = !!localStorage.getItem('anthropic_api_key');
+    document.getElementById('scanAiBtn').style.display = hasKey ? 'block' : 'none';
+    document.getElementById('scanAiHint').style.display = hasKey ? 'none' : 'block';
     // name OCR is English-only; in JP mode offer number-scan only
     const jp = lang === 'jp';
     document.getElementById('scanNameBtn').style.display = jp ? 'none' : 'block';
