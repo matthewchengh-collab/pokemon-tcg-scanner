@@ -149,6 +149,22 @@
     background: rgba(26,28,46,0.97); backdrop-filter: blur(8px);
     box-shadow: 0 -4px 20px rgba(0,0,0,0.45); }
   #page-search.scanning { padding-bottom: 200px; }   /* keep video clear of the pinned bar */
+  /* collection */
+  .coll-summary { display: flex; justify-content: space-around; text-align: center; }
+  .coll-summary .big { font-size: 24px; font-weight: 800; }
+  .coll-summary .lbl { font-size: 11px; color: #8a7fb0; }
+  .coll-item { display: flex; align-items: center; gap: 11px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.07); }
+  .coll-item:last-child { border-bottom: none; }
+  .coll-item img, .coll-item .result-thumb { width: 42px; height: 58px; border-radius: 6px; object-fit: cover; flex-shrink: 0; background: rgba(0,0,0,0.3); }
+  .coll-info { flex: 1; min-width: 0; }
+  .coll-name { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .coll-sub { font-size: 12px; color: #b8a9e0; }
+  .coll-val { font-size: 13px; font-weight: 700; color: #7CFFB2; margin-top: 2px; }
+  .coll-qty { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .coll-qty button { width: 28px; height: 28px; padding: 0; margin: 0; border-radius: 8px; font-size: 16px; font-weight: 700;
+    background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); cursor: pointer; }
+  .coll-qty .rm { background: rgba(255,138,138,0.15); border-color: rgba(255,138,138,0.4); }
+  .coll-qty span { min-width: 18px; text-align: center; font-weight: 700; }
   .scanstatus { font-size: 13px; color: #ffcb05; text-align: center; min-height: 18px; margin-bottom: 6px; }
 
   /* Cond video / snapshot */
@@ -165,11 +181,12 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v15</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v16</span></p>
 </div>
 
 <div class="nav">
   <div class="nav-tab active"  onclick="showTab('search')">🔍 Search</div>
+  <div class="nav-tab"         onclick="showTab('collection')">📚 Collection</div>
   <div class="nav-tab"         onclick="showTab('condition')">🔬 Condition</div>
   <div class="nav-tab"         onclick="showTab('settings')">⚙️ Settings</div>
 </div>
@@ -214,6 +231,9 @@
   <div id="cardDetail"></div>
   <div id="historySection"></div>
 </div>
+
+<!-- ─── COLLECTION TAB ─── -->
+<div class="page" id="page-collection"></div>
 
 <!-- ─── CONDITION TAB ─── -->
 <div class="page" id="page-condition">
@@ -311,12 +331,13 @@ const CHECKLIST = [
 // ══════════════════════════════════════════════════════════
 function showTab(tab) {
   document.querySelectorAll('.nav-tab').forEach((el, i) => {
-    el.classList.toggle('active', ['search','condition','settings'][i] === tab);
+    el.classList.toggle('active', ['search','collection','condition','settings'][i] === tab);
   });
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + tab).classList.add('active');
-  if (tab === 'condition') renderCondTab();
-  if (tab === 'settings')  loadSettings();
+  if (tab === 'collection') renderCollection();
+  if (tab === 'condition')  renderCondTab();
+  if (tab === 'settings')   loadSettings();
 }
 
 // ══════════════════════════════════════════════════════════
@@ -548,6 +569,110 @@ function clearHistory() {
   renderHistory();
 }
 
+// ─── Collection tracker (stored on device → viewable offline) ───
+function collKey(c) { return `${c.name}|${c.number}|${c.set?.name || c.setName || ''}`; }
+function getCollection() { return JSON.parse(localStorage.getItem('collection') || '[]'); }
+function saveCollection(coll) { localStorage.setItem('collection', JSON.stringify(coll)); }
+function isInCollection(card) { const k = collKey(card); return getCollection().some(e => e.key === k); }
+
+function toggleCollection() {
+  if (!currentCard) return;
+  const k = collKey(currentCard);
+  let coll = getCollection();
+  if (coll.some(e => e.key === k)) {
+    coll = coll.filter(e => e.key !== k);   // remove
+  } else {
+    const p = bestPrice(currentCard);
+    coll.unshift({
+      key: k, name: currentCard.name, number: currentCard.number,
+      total: currentCard.set?.printedTotal || '', setName: currentCard.set?.name || '',
+      image: currentCard.images?.small || '', jp: !!currentCard._jp,
+      price: p?.market ?? null, qty: 1,
+    });
+  }
+  saveCollection(coll);
+  renderCardDetail(currentCard);   // refresh the button label
+}
+
+function changeQty(key, delta) {
+  let coll = getCollection();
+  const e = coll.find(x => x.key === key);
+  if (!e) return;
+  e.qty = Math.max(1, (e.qty || 1) + delta);
+  saveCollection(coll);
+  renderCollection();
+}
+
+function removeFromCollection(key) {
+  saveCollection(getCollection().filter(e => e.key !== key));
+  renderCollection();
+}
+
+function renderCollection() {
+  const coll = getCollection();
+  const el = document.getElementById('page-collection');
+  if (!coll.length) {
+    el.innerHTML = `<div class="panel" style="text-align:center;padding:28px">
+      <div style="font-size:36px;margin-bottom:10px">📚</div>
+      <div style="font-weight:700;margin-bottom:6px">No cards yet</div>
+      <div class="hint">Find a card in Search, then tap <b>➕ Add to Collection</b>.</div></div>`;
+    return;
+  }
+  let cards = 0, value = 0, priced = 0;
+  coll.forEach(e => { cards += e.qty; if (e.price != null) { value += e.price * e.qty; priced++; } });
+
+  let html = `<div class="panel">
+    <div class="coll-summary">
+      <div><div class="big">${cards}</div><div class="lbl">cards</div></div>
+      <div><div class="big" style="color:#7CFFB2">$${value.toFixed(2)}</div><div class="lbl">est. value</div></div>
+      <div><div class="big">${coll.length}</div><div class="lbl">unique</div></div>
+    </div>
+    ${priced < coll.length ? `<div class="hint" style="margin-top:8px">${coll.length - priced} card(s) have no price (e.g. Japanese) and aren't in the total.</div>` : ''}
+    <button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="refreshCollectionPrices()">🔄 Refresh prices (uses internet)</button>
+  </div>`;
+
+  html += '<div class="panel">';
+  coll.forEach(e => {
+    const val = e.price != null ? `$${(e.price * e.qty).toFixed(2)}` : (e.jp ? '🇯🇵 —' : '—');
+    const img = e.image ? `<img src="${e.image}" onerror="this.style.visibility='hidden'">` : `<div class="result-thumb"></div>`;
+    html += `<div class="coll-item">
+      ${img}
+      <div class="coll-info">
+        <div class="coll-name">${e.name}</div>
+        <div class="coll-sub">${e.setName || (e.jp ? 'Japanese' : '')} · #${e.number}</div>
+        <div class="coll-val">${val}${e.price != null && e.qty > 1 ? ` <span style="color:#8a7fb0">($${e.price.toFixed(2)} ea)</span>` : ''}</div>
+      </div>
+      <div class="coll-qty">
+        <button onclick="changeQty('${e.key.replace(/'/g, "\\'")}', -1)">−</button>
+        <span>${e.qty}</span>
+        <button onclick="changeQty('${e.key.replace(/'/g, "\\'")}', 1)">+</button>
+        <button class="rm" onclick="removeFromCollection('${e.key.replace(/'/g, "\\'")}')">🗑</button>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+async function refreshCollectionPrices() {
+  const coll = getCollection();
+  if (!coll.length) return;
+  const el = document.getElementById('page-collection');
+  el.insertAdjacentHTML('afterbegin', '<div class="loading" id="collLoading">🔄 Refreshing prices…</div>');
+  for (const e of coll) {
+    if (e.jp) continue;   // no free JP price feed
+    try {
+      const cardNum = (e.number || '').toString().replace(/^0+(?=\d)/, '');
+      const q = e.total ? `name:"${e.name}" number:${cardNum} set.printedTotal:${e.total}` : `name:"${e.name}" number:${cardNum}`;
+      const cards = await fetchCards(q, 1);
+      const p = cards[0] ? bestPrice(cards[0]) : null;
+      if (p?.market != null) e.price = p.market;
+    } catch(err) {}
+  }
+  saveCollection(coll);
+  renderCollection();
+}
+
 function backToResults() {
   document.getElementById('cardDetail').innerHTML = '';
   renderResultsList(_searchCards);
@@ -604,6 +729,8 @@ function renderCardDetail(card) {
   if (lastScanPhoto && localStorage.getItem('anthropic_api_key')) {
     html += `<button class="btn btn-primary" style="background:linear-gradient(135deg,#a06bff 0%,#ff6bcb 100%);color:#fff" onclick="gradeFromScan()">✨ Grade this card from your scan</button>`;
   }
+  const inColl = isInCollection(card);
+  html += `<button class="btn ${inColl ? 'btn-secondary' : 'btn-primary'}" id="collectBtn" onclick="toggleCollection()">${inColl ? '✓ In your collection — tap to remove' : '➕ Add to Collection'}</button>`;
   html += `<button class="btn btn-primary" onclick="showTab('condition')">🔬 Assess Condition</button>
     <button class="btn btn-secondary" onclick="window.open('${ebayUrl}','_blank')">${card._jp ? 'See sold on eBay →' : 'See on eBay →'}</button>
   </div>`;
