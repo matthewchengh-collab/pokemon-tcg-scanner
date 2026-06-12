@@ -136,7 +136,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v8</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v9</span></p>
 </div>
 
 <div class="nav">
@@ -158,15 +158,18 @@
     <div class="hint" id="searchHint" style="margin-bottom:10px">Name search finds all versions. Add a number to narrow down.</div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-primary" style="margin:0" onclick="doSearch()">Search</button>
-      <button class="btn btn-secondary btn-sm" id="scanToggleBtn" onclick="toggleScanCamera()">📷 Scan #</button>
+      <button class="btn btn-secondary btn-sm" id="scanToggleBtn" onclick="toggleScanCamera()">📷 Scan card</button>
     </div>
   </div>
 
   <div class="scan-wrap" id="scanWrap">
     <video id="scanVideo" playsinline></video>
-    <div class="scan-guide"><span>Line up the number inside the box</span></div>
+    <div class="scan-guide"><span id="scanGuideLabel">Line up the name OR number in the box</span></div>
   </div>
-  <button class="btn btn-primary" id="scanCaptureBtn" style="display:none" onclick="captureAndRead()">📸 Capture &amp; read</button>
+  <div id="scanCaptureRow" style="display:none; gap:8px">
+    <button class="btn btn-primary" id="scanNameBtn" style="margin:0" onclick="captureAndRead('name')">🃏 Read name</button>
+    <button class="btn btn-primary" style="margin:0" onclick="captureAndRead('number')">🔢 Read number</button>
+  </div>
   <div class="scanstatus" id="scanStatus"></div>
 
   <div id="searchResults"></div>
@@ -536,11 +539,17 @@ async function toggleScanCamera() {
     scanning = true;
     btn.textContent = '✖ Close';
     document.getElementById('scanWrap').style.display = 'block';
-    document.getElementById('scanCaptureBtn').style.display = 'block';
-    document.getElementById('scanStatus').textContent = 'Line up the number in the box, then tap Capture';
+    document.getElementById('scanCaptureRow').style.display = 'flex';
+    // name OCR is English-only; in JP mode offer number-scan only
+    const jp = lang === 'jp';
+    document.getElementById('scanNameBtn').style.display = jp ? 'none' : 'block';
+    document.getElementById('scanGuideLabel').textContent = jp ? 'Line up the number in the box' : 'Line up the name OR number in the box';
+    document.getElementById('scanStatus').textContent = jp
+      ? 'Aim at the number, then tap Read number'
+      : 'Aim at the name or number, then tap the matching button';
     getOcrWorker().catch(() => {});   // warm up OCR in the background while they aim
   } catch(e) {
-    document.getElementById('scanStatus').textContent = 'Camera blocked — type the number instead';
+    document.getElementById('scanStatus').textContent = 'Camera blocked — type the name or number instead';
   }
 }
 
@@ -548,11 +557,15 @@ function stopScanCamera() {
   scanning = false;
   if (scanStream) scanStream.getTracks().forEach(t => t.stop());
   document.getElementById('scanWrap').style.display = 'none';
-  document.getElementById('scanCaptureBtn').style.display = 'none';
-  document.getElementById('scanToggleBtn').textContent = '📷 Scan #';
+  document.getElementById('scanCaptureRow').style.display = 'none';
+  document.getElementById('scanToggleBtn').textContent = '📷 Scan card';
   document.getElementById('scanStatus').textContent = '';
 }
 
+const WHITELIST = {
+  number: '0123456789/',
+  name:   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz '.-",
+};
 let ocrWorker = null;
 
 async function getOcrWorker() {
@@ -560,20 +573,21 @@ async function getOcrWorker() {
   if (!window.Tesseract) throw new Error('OCR library not loaded — check your connection');
   document.getElementById('scanStatus').textContent = '⏳ Loading scanner (first time only)…';
   ocrWorker = await Tesseract.createWorker('eng');
-  await ocrWorker.setParameters({ tessedit_char_whitelist: '0123456789/' });
   return ocrWorker;
 }
 
-// Read ONLY the pixels inside the guide box — what you aim at is what it reads
-async function captureAndRead() {
+// Read ONLY the pixels inside the guide box — what you aim at is what it reads.
+// mode: 'number' reads the collector number, 'name' reads the card name.
+async function captureAndRead(mode) {
   if (!scanning) return;
+  const status = document.getElementById('scanStatus');
   let worker;
   try { worker = await getOcrWorker(); }
-  catch(e) { document.getElementById('scanStatus').textContent = e.message + ' — type the number instead'; return; }
+  catch(e) { status.textContent = e.message + ' — type it instead'; return; }
 
   const vid = document.getElementById('scanVideo');
   const vw = vid.videoWidth, vh = vid.videoHeight;
-  if (!vw || !vh) { document.getElementById('scanStatus').textContent = 'Camera still warming up — try again in a sec'; return; }
+  if (!vw || !vh) { status.textContent = 'Camera still warming up — try again in a sec'; return; }
 
   // crop the guide region and upscale 3x for a sharp read
   const sx = GUIDE.x * vw, sy = GUIDE.y * vh, sw = GUIDE.w * vw, sh = GUIDE.h * vh;
@@ -581,22 +595,37 @@ async function captureAndRead() {
   canvas.width = sw * 3; canvas.height = sh * 3;
   canvas.getContext('2d').drawImage(vid, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
 
-  document.getElementById('scanStatus').textContent = '🔎 Reading…';
+  status.textContent = mode === 'name' ? '🔎 Reading the name…' : '🔎 Reading the number…';
   try {
+    await worker.setParameters({ tessedit_char_whitelist: WHITELIST[mode] });
     const { data: { text } } = await worker.recognize(canvas);
-    // prefer the "123/197" form; fall back to the first standalone number
-    const m = text.match(/(\d{1,3})\s*\/\s*(\d{1,3})/) || text.match(/(\d{1,3})/);
-    if (m) {
-      const val = m[2] ? `${m[1]}/${m[2]}` : m[1];
-      document.getElementById('searchNum').value = val;
-      stopScanCamera();
-      document.getElementById('scanStatus').textContent = `Scanned: ${val} ✓`;
-      doSearch();
+
+    if (mode === 'number') {
+      const m = text.match(/(\d{1,3})\s*\/\s*(\d{1,3})/) || text.match(/(\d{1,3})/);
+      if (m) {
+        const val = m[2] ? `${m[1]}/${m[2]}` : m[1];
+        document.getElementById('searchNum').value = val;
+        stopScanCamera();
+        status.textContent = `Scanned number: ${val} ✓`;
+        doSearch();
+      } else {
+        status.textContent = "Couldn't read the number — center it in the box, hold steady, tap again (or type it below).";
+      }
     } else {
-      document.getElementById('scanStatus').textContent = "Couldn't read it — center the number in the box, hold steady, and tap Capture again (or type it below).";
+      // name: keep letters/spaces, collapse whitespace, drop stray single chars
+      const name = text.replace(/[^A-Za-z '.\-]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (name.length >= 2) {
+        document.getElementById('searchName').value = name;
+        document.getElementById('searchNum').value = '';   // fresh name lookup
+        stopScanCamera();
+        status.textContent = `Scanned name: ${name} ✓`;
+        doSearch();
+      } else {
+        status.textContent = "Couldn't read the name — fill the box with just the name, hold steady, tap again (or type it below).";
+      }
     }
   } catch(e) {
-    document.getElementById('scanStatus').textContent = 'Read failed — try again, or type the number below.';
+    status.textContent = 'Read failed — try again, or type it below.';
   }
 }
 
