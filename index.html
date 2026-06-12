@@ -309,6 +309,7 @@ async function doSearch() {
 
     if (!cards.length) { setResults('<div class="err">No cards found. Try a different name.</div>'); return; }
 
+    _searchCards = cards;
     if (cards.length === 1) { selectCard(cards[0]); return; }
     renderResultsList(cards);
   } catch(e) {
@@ -332,8 +333,10 @@ async function doSearchJP(name, num) {
     }));
 
     if (!cards.length) { setResults('<div class="err">No Japanese cards found. Try the number, or paste the Japanese name.</div>'); return; }
-    if (cards.length === 1) { selectCardJP(cards[0]); return; }
-    renderResultsList(cards.slice(0, 40));   // cap; pick visually from photos
+    const capped = cards.slice(0, 40);   // cap; pick visually from photos
+    _searchCards = capped;
+    if (capped.length === 1) { selectCardJP(capped[0]); return; }
+    renderResultsList(capped);
   } catch(e) {
     setResults('<div class="err">Japanese search failed — check your connection and try again.</div>');
   }
@@ -393,6 +396,12 @@ function selectCard(card) {
   renderCardDetail(card);
 }
 
+function backToResults() {
+  document.getElementById('cardDetail').innerHTML = '';
+  renderResultsList(_searchCards);
+  document.getElementById('searchResults').scrollIntoView({ behavior: 'smooth' });
+}
+
 function renderCardDetail(card) {
   const p          = bestPrice(card);
   const gradeCost  = getGradeCost();
@@ -400,6 +409,7 @@ function renderCardDetail(card) {
   const tp         = card.tcgplayer?.prices;
 
   let html = '';
+  if (_searchCards.length > 1) html += `<button class="btn btn-secondary btn-sm" style="margin-bottom:14px" onclick="backToResults()">← Back to results</button>`;
   if (imgLarge) html += `<img class="card-img-lg" src="${imgLarge}" alt="${card.name}">`;
   html += `<div class="card-title">${card.name}</div>`;
   html += `<div class="card-sub">${card.set?.name || ''} · #${card.number}/${card.set?.printedTotal || '?'} · ${card.rarity || ''}</div>`;
