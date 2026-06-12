@@ -136,7 +136,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v11</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v12</span></p>
 </div>
 
 <div class="nav">
@@ -166,9 +166,12 @@
     <video id="scanVideo" playsinline></video>
     <div class="scan-guide"><span id="scanGuideLabel">Line up the name OR number in the box</span></div>
   </div>
-  <div id="scanCaptureRow" style="display:none; gap:8px">
-    <button class="btn btn-primary" id="scanNameBtn" style="margin:0" onclick="captureAndRead('name')">🃏 Read name</button>
-    <button class="btn btn-primary" style="margin:0" onclick="captureAndRead('number')">🔢 Read number</button>
+  <div id="scanCaptureRow" style="display:none; flex-direction:column; gap:8px">
+    <button class="btn btn-primary" id="scanAiBtn" style="margin:0; display:none; background:linear-gradient(135deg,#a06bff 0%,#ff6bcb 100%); color:#fff" onclick="aiScanCard()">✨ AI scan — fit the whole card in view</button>
+    <div style="display:flex; gap:8px">
+      <button class="btn btn-secondary btn-sm" id="scanNameBtn" style="margin:0" onclick="captureAndRead('name')">🃏 Read name</button>
+      <button class="btn btn-secondary btn-sm" style="margin:0" onclick="captureAndRead('number')">🔢 Read number</button>
+    </div>
   </div>
   <div class="scanstatus" id="scanStatus"></div>
 
@@ -220,8 +223,8 @@
 <!-- ─── SETTINGS TAB ─── -->
 <div class="page" id="page-settings">
   <div class="panel">
-    <div class="sec">Claude AI (for photo analysis)</div>
-    <div class="hint" style="margin-bottom:10px">Get a free API key at <b>console.anthropic.com</b>. Stored only on this device.</div>
+    <div class="sec">Claude AI (photo card-ID + condition)</div>
+    <div class="hint" style="margin-bottom:10px">Create a key at <b>console.anthropic.com</b> and add ~$5 credit (Billing). Pay-as-you-go — about $0.003 per scan. Enables ✨ AI scan and AI condition grading. Stored only on this device.</div>
     <input id="apiKeyInput" type="password" placeholder="sk-ant-api03-…" style="font-family:monospace">
     <button class="btn btn-primary" onclick="saveApiKey()">Save Key</button>
     <div id="apiKeyMsg" class="hint" style="margin-top:4px"></div>
@@ -540,6 +543,8 @@ async function toggleScanCamera() {
     btn.textContent = '✖ Close';
     document.getElementById('scanWrap').style.display = 'block';
     document.getElementById('scanCaptureRow').style.display = 'flex';
+    // AI scan (whole card, EN+JP) available when an API key is saved
+    document.getElementById('scanAiBtn').style.display = localStorage.getItem('anthropic_api_key') ? 'block' : 'none';
     // name OCR is English-only; in JP mode offer number-scan only
     const jp = lang === 'jp';
     document.getElementById('scanNameBtn').style.display = jp ? 'none' : 'block';
@@ -637,6 +642,72 @@ async function captureAndRead(mode) {
     }
   } catch(e) {
     status.textContent = 'Read failed — try again, or type it below.';
+  }
+}
+
+// ✨ Vision card-ID: photograph the whole card, let Claude identify it (English + Japanese)
+async function aiScanCard() {
+  const apiKey = localStorage.getItem('anthropic_api_key');
+  if (!apiKey) { alert('Add your Claude API key in Settings to use AI scan.'); return; }
+  const status = document.getElementById('scanStatus');
+  const vid = document.getElementById('scanVideo');
+  const vw = vid.videoWidth, vh = vid.videoHeight;
+  if (!vw || !vh) { status.textContent = 'Camera still warming up — try again in a sec'; return; }
+
+  // capture the full frame, downscaled to keep the request small/cheap
+  const scale = Math.min(1, 1024 / Math.max(vw, vh));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(vw * scale); canvas.height = Math.round(vh * scale);
+  canvas.getContext('2d').drawImage(vid, 0, 0, canvas.width, canvas.height);
+  const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+
+  status.textContent = '✨ AI is identifying the card…';
+  const prompt = `Identify this Pokémon trading card from the photo. Read the small collector number printed near a bottom corner (format like 003/091 — numerator/set total).
+Reply with ONLY this JSON, no other text:
+{"language":"english" or "japanese","name":"the Pokémon/card name in English","number":"collector numerator e.g. 3","total":"set total e.g. 91"}
+If you can't read a field, use "". Base "language" on whether the card text is English or Japanese.`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 300,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+          { type: 'text', text: prompt },
+        ] }],
+      }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API error ${resp.status}`);
+    }
+    const data = await resp.json();
+    const txt = data.content?.find(b => b.type === 'text')?.text || '';
+    const match = txt.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('Could not parse AI response');
+    const id = JSON.parse(match[0]);
+
+    const num = (id.number || '').toString().replace(/[^0-9]/g, '');
+    const tot = (id.total  || '').toString().replace(/[^0-9]/g, '');
+    if (!num && !id.name) { status.textContent = "AI couldn't identify the card — try again with the whole card in clear view."; return; }
+
+    stopScanCamera();
+    setLang(id.language === 'japanese' ? 'jp' : 'en');
+    // number is the precise key; name helps for English
+    document.getElementById('searchNum').value  = num ? (tot ? `${num}/${tot}` : num) : '';
+    document.getElementById('searchName').value = (id.language !== 'japanese' && id.name) ? id.name : '';
+    status.textContent = `✨ Identified: ${id.name || ''} ${num ? `#${num}${tot ? '/' + tot : ''}` : ''} ✓`;
+    doSearch();
+  } catch(e) {
+    status.textContent = `AI scan failed: ${e.message}. Check your key/credit in Settings, or use Read name / number.`;
   }
 }
 
@@ -747,6 +818,7 @@ Reply ONLY with this JSON object, no markdown, no explanation outside the JSON:
       headers: {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
         'content-type': 'application/json',
       },
       body: JSON.stringify({
