@@ -26,15 +26,17 @@
 
   /* Pages */
   .page { display: none; padding: 16px; }
-  .page.active { display: block; }
+  .page.active { display: block; animation: fadeIn 0.25s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
   /* Panels */
   .panel { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 16px; margin-bottom: 14px; }
 
   /* Buttons */
-  .btn { width: 100%; padding: 15px; font-size: 16px; font-weight: 700; border: none; border-radius: 14px; cursor: pointer; margin-bottom: 10px; }
+  .btn { width: 100%; padding: 15px; font-size: 16px; font-weight: 700; border: none; border-radius: 14px; cursor: pointer; margin-bottom: 10px; transition: transform 0.12s ease, box-shadow 0.12s ease; }
   .btn:last-child { margin-bottom: 0; }
-  .btn:active { transform: scale(0.98); }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { box-shadow: 0 4px 14px rgba(255,149,0,0.25); }
   .btn-primary { background: linear-gradient(135deg, #ffcb05 0%, #ff9500 100%); color: #1a1c2e; }
   .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); }
   .btn-sm { padding: 10px 16px; font-size: 14px; width: auto; margin: 0; }
@@ -59,7 +61,8 @@
   .divider { height: 1px; background: rgba(255,255,255,0.08); margin: 14px 0; }
 
   /* Search results list */
-  .result-item { display: flex; align-items: center; gap: 12px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 12px; margin-bottom: 8px; cursor: pointer; border: 1px solid transparent; }
+  .result-item { display: flex; align-items: center; gap: 12px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 12px; margin-bottom: 8px; cursor: pointer; border: 1px solid transparent; transition: background 0.15s, transform 0.12s, border-color 0.15s; }
+  .result-item:active { transform: scale(0.985); background: rgba(255,255,255,0.09); border-color: rgba(255,203,5,0.4); }
   .result-item:active { background: rgba(255,203,5,0.1); border-color: rgba(255,203,5,0.3); }
   .result-item img { width: 44px; border-radius: 6px; flex-shrink: 0; }
   .result-thumb { width: 44px; height: 60px; background: rgba(255,255,255,0.05); border-radius: 6px; flex-shrink: 0; }
@@ -124,6 +127,22 @@
     display: flex; align-items: center; justify-content: center; text-shadow: 0 1px 2px #000; }
   .band-name { top: 0; height: 24%; border-bottom: 1px dashed #ffcb05; }
   .band-num  { bottom: 0; height: 14%; border-top: 1px dashed #ffcb05; }
+  /* frozen frame + spinner shown during the AI call (kills the jittery live feed) */
+  #scanFreeze { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
+  #scanSpinner { position: absolute; inset: 0; display: none; flex-direction: column; gap: 12px;
+    align-items: center; justify-content: center; background: rgba(20,16,40,0.55); color: #fff;
+    font-weight: 700; font-size: 15px; backdrop-filter: blur(2px); }
+  .spinner { width: 42px; height: 42px; border: 4px solid rgba(255,255,255,0.25);
+    border-top-color: #ffcb05; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* recent-scans strip */
+  .hist-row { display: flex; gap: 10px; overflow-x: auto; padding: 2px; -webkit-overflow-scrolling: touch; }
+  .hist-item { flex: 0 0 84px; cursor: pointer; text-align: center; transition: transform 0.15s; }
+  .hist-item:active { transform: scale(0.94); }
+  .hist-item img, .hist-noimg { width: 84px; height: 117px; border-radius: 8px; object-fit: cover;
+    background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; font-size: 28px; }
+  .hist-name { font-size: 11px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hist-val { font-size: 12px; font-weight: 700; color: #7CFFB2; }
   .scanstatus { font-size: 13px; color: #ffcb05; text-align: center; min-height: 18px; margin-bottom: 6px; }
 
   /* Cond video / snapshot */
@@ -140,7 +159,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v13</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v14</span></p>
 </div>
 
 <div class="nav">
@@ -168,10 +187,12 @@
 
   <div class="scan-wrap" id="scanWrap">
     <video id="scanVideo" playsinline></video>
-    <div class="card-outline">
+    <img id="scanFreeze" alt="">
+    <div class="card-outline" id="cardOutline">
       <div class="band band-name">🃏 card name</div>
       <div class="band band-num">🔢 number</div>
     </div>
+    <div id="scanSpinner"><div class="spinner"></div><div id="scanSpinnerText">✨ Identifying…</div></div>
   </div>
   <div id="scanCaptureRow" style="display:none; flex-direction:column; gap:8px">
     <button class="btn btn-primary" id="scanAiBtn" style="margin:0; display:none; background:linear-gradient(135deg,#a06bff 0%,#ff6bcb 100%); color:#fff" onclick="aiScanCard()">✨ AI scan — fit the whole card in view</button>
@@ -184,6 +205,7 @@
 
   <div id="searchResults"></div>
   <div id="cardDetail"></div>
+  <div id="historySection"></div>
 </div>
 
 <!-- ─── CONDITION TAB ─── -->
@@ -267,6 +289,7 @@ let scanStream   = null, scanning = false;
 let condStream   = null, condCameraOn = false, condPhoto = null;
 let checkState   = {};   // manual checklist selections
 let _searchCards = [];
+let lastScanPhoto = null;  // last AI-scan photo, reused for one-tap grading
 
 const CHECKLIST = [
   { id:'corners',  label:'Corners',       opts:['Sharp/Mint','Light wear','Moderate','Heavy wear'],  scores:[10,7,4,1] },
@@ -428,6 +451,7 @@ async function selectCardJP(card) {
   currentCard = card;
   setResults('');
   renderCardDetail(card);
+  addToHistory(card);
 }
 
 async function fetchCards(q, n) {
@@ -468,6 +492,53 @@ function selectCard(card) {
   currentCard = card;
   setResults('');
   renderCardDetail(card);
+  addToHistory(card);
+}
+
+// ─── Recent scans history ───
+function addToHistory(card) {
+  const p = bestPrice(card);
+  const entry = {
+    name: card.name, number: card.number, total: card.set?.printedTotal || '',
+    setName: card.set?.name || '', image: card.images?.small || '',
+    jp: !!card._jp, price: p?.market ?? null,
+  };
+  let hist = JSON.parse(localStorage.getItem('scan_history') || '[]');
+  hist = hist.filter(h => !(h.name === entry.name && h.number === entry.number && h.setName === entry.setName));
+  hist.unshift(entry);
+  hist = hist.slice(0, 12);
+  localStorage.setItem('scan_history', JSON.stringify(hist));
+  renderHistory();
+}
+
+function renderHistory() {
+  const hist = JSON.parse(localStorage.getItem('scan_history') || '[]');
+  const el = document.getElementById('historySection');
+  if (!hist.length) { el.innerHTML = ''; return; }
+  let html = `<div class="panel"><div class="sec" style="display:flex;justify-content:space-between;align-items:center">
+    Recent <span style="font-size:11px;color:#8a7fb0;cursor:pointer;font-weight:400" onclick="clearHistory()">clear</span></div><div class="hist-row">`;
+  hist.forEach((h, i) => {
+    const val = h.price != null ? '$' + h.price.toFixed(0) : (h.jp ? '🇯🇵' : '—');
+    const img = h.image ? `<img src="${h.image}" onerror="this.outerHTML='<div class=\\'hist-noimg\\'>🃏</div>'">` : `<div class="hist-noimg">🃏</div>`;
+    html += `<div class="hist-item" onclick="openHistory(${i})">${img}
+      <div class="hist-name">${h.name}</div><div class="hist-val">${val}</div></div>`;
+  });
+  html += '</div></div>';
+  el.innerHTML = html;
+}
+
+function openHistory(i) {
+  const h = JSON.parse(localStorage.getItem('scan_history') || '[]')[i];
+  if (!h) return;
+  setLang(h.jp ? 'jp' : 'en');
+  document.getElementById('searchName').value = h.jp ? '' : h.name;
+  document.getElementById('searchNum').value  = h.total ? `${h.number}/${h.total}` : (h.number || '');
+  doSearch();
+}
+
+function clearHistory() {
+  localStorage.removeItem('scan_history');
+  renderHistory();
 }
 
 function backToResults() {
@@ -521,8 +592,12 @@ function renderCardDetail(card) {
 
   const ebayKw  = card._jp ? `${card.name} ${card.number} japanese pokemon` : `${card.name} ${card.number} pokemon`;
   const ebayUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(ebayKw)}` + (card._jp ? '&LH_Sold=1&LH_Complete=1' : '');
-  html += `<div style="margin-top:16px">
-    <button class="btn btn-primary" onclick="showTab('condition')">🔬 Assess Condition</button>
+  html += '<div style="margin-top:16px">';
+  // one-tap: grade this card straight from the scan photo (same photo, no re-shoot)
+  if (lastScanPhoto && localStorage.getItem('anthropic_api_key')) {
+    html += `<button class="btn btn-primary" style="background:linear-gradient(135deg,#a06bff 0%,#ff6bcb 100%);color:#fff" onclick="gradeFromScan()">✨ Grade this card from your scan</button>`;
+  }
+  html += `<button class="btn btn-primary" onclick="showTab('condition')">🔬 Assess Condition</button>
     <button class="btn btn-secondary" onclick="window.open('${ebayUrl}','_blank')">${card._jp ? 'See sold on eBay →' : 'See on eBay →'}</button>
   </div>`;
 
@@ -574,6 +649,10 @@ function stopScanCamera() {
   document.getElementById('scanCaptureRow').style.display = 'none';
   document.getElementById('scanToggleBtn').textContent = '📷 Scan card';
   document.getElementById('scanStatus').textContent = '';
+  // reset freeze overlay so the next open starts clean
+  document.getElementById('scanFreeze').style.display = 'none';
+  document.getElementById('scanSpinner').style.display = 'none';
+  document.getElementById('cardOutline').style.display = 'block';
 }
 
 const WHITELIST = {
@@ -710,8 +789,12 @@ async function aiScanCard() {
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(vw * scale); canvas.height = Math.round(vh * scale);
   canvas.getContext('2d').drawImage(vid, 0, 0, canvas.width, canvas.height);
-  const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+  const base64 = dataUrl.split(',')[1];
+  lastScanPhoto = dataUrl;   // reuse for one-tap grading
 
+  // freeze the frame + show spinner so the jittery live feed stops during the API call
+  freezeScan(dataUrl, '✨ Identifying the card…');
   status.textContent = '✨ AI is identifying the card…';
   const prompt = `Identify this Pokémon trading card from the photo. Read the small collector number printed near a bottom corner (format like 003/091 — numerator/set total).
 Reply with ONLY this JSON, no other text:
@@ -748,7 +831,7 @@ If you can't read a field, use "". Base "language" on whether the card text is E
 
     const num = (id.number || '').toString().replace(/[^0-9]/g, '');
     const tot = (id.total  || '').toString().replace(/[^0-9]/g, '');
-    if (!num && !id.name) { status.textContent = "AI couldn't identify the card — try again with the whole card in clear view."; return; }
+    if (!num && !id.name) { unfreezeScan(); status.textContent = "AI couldn't identify the card — try again with the whole card in clear view."; return; }
 
     stopScanCamera();
     setLang(id.language === 'japanese' ? 'jp' : 'en');
@@ -758,8 +841,33 @@ If you can't read a field, use "". Base "language" on whether the card text is E
     status.textContent = `✨ Identified: ${id.name || ''} ${num ? `#${num}${tot ? '/' + tot : ''}` : ''} ✓`;
     doSearch();
   } catch(e) {
+    unfreezeScan();
     status.textContent = `AI scan failed: ${e.message}. Check your key/credit in Settings, or use Read name / number.`;
   }
+}
+
+// Freeze the live preview behind a still + spinner during the AI call; unfreeze to retry
+function freezeScan(dataUrl, label) {
+  const f = document.getElementById('scanFreeze');
+  f.src = dataUrl; f.style.display = 'block';
+  document.getElementById('cardOutline').style.display = 'none';
+  document.getElementById('scanSpinnerText').textContent = label || '✨ Working…';
+  document.getElementById('scanSpinner').style.display = 'flex';
+  try { document.getElementById('scanVideo').pause(); } catch(e) {}
+}
+function unfreezeScan() {
+  document.getElementById('scanFreeze').style.display = 'none';
+  document.getElementById('scanSpinner').style.display = 'none';
+  document.getElementById('cardOutline').style.display = 'block';
+  try { document.getElementById('scanVideo').play(); } catch(e) {}
+}
+
+// One-tap: grade the current card using the photo from the AI scan (no re-shoot)
+function gradeFromScan() {
+  if (!lastScanPhoto) { alert('No scan photo available — scan a card first.'); return; }
+  condPhoto = lastScanPhoto;
+  showTab('condition');
+  analyzeCondition();
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1089,6 +1197,7 @@ function getGradeCost() {
 // Init
 loadSettings();
 setLang(localStorage.getItem('card_lang') || 'en');
+renderHistory();
 </script>
 </body>
 </html>
