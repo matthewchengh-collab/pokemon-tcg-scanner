@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Pokemon Card Scanner</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
   body {
@@ -262,10 +263,12 @@ async function doSearch() {
   document.getElementById('cardDetail').innerHTML = '';
 
   try {
+    // card numbers are stored bare in the API ("4", not "004") — strip leading zeros
+    const cardNum = num.split('/')[0].replace(/^0+(?=\d)/, '');
     let q = '';
-    if (name && num) q = `name:"${name}" number:${num.split('/')[0]}`;
+    if (name && num) q = `name:"${name}" number:${cardNum}`;
     else if (name)   q = `name:"${name}"`;
-    else             q = `number:${num.split('/')[0]}`;
+    else             q = `number:${cardNum}`;
 
     let cards = await fetchCards(q, 20);
 
@@ -394,31 +397,54 @@ function stopScanCamera() {
   document.getElementById('scanToggleBtn').textContent = '📷 Scan #';
   document.getElementById('scanStatus').textContent = '';
 }
+let ocrWorker = null;
+
+async function getOcrWorker() {
+  if (ocrWorker) return ocrWorker;
+  if (!window.Tesseract) throw new Error('OCR library not loaded — check your connection');
+  document.getElementById('scanStatus').textContent = '⏳ Loading scanner (first time only)…';
+  ocrWorker = await Tesseract.createWorker('eng');
+  await ocrWorker.setParameters({ tessedit_char_whitelist: '0123456789/' });
+  return ocrWorker;
+}
+
 async function runScanLoop() {
-  if (!window.TextDetector) {
-    document.getElementById('scanStatus').textContent = 'Auto-scan unavailable on this device — type the number';
+  let worker;
+  try {
+    worker = await getOcrWorker();
+  } catch(e) {
+    document.getElementById('scanStatus').textContent = e.message + ' — type the number instead';
     return;
   }
-  const detector = new TextDetector();
+  if (!scanning) return;   // user stopped while OCR was loading
+
   const canvas = document.createElement('canvas');
   const vid = document.getElementById('scanVideo');
+
   while (scanning) {
     try {
-      canvas.width = vid.videoWidth; canvas.height = vid.videoHeight;
-      canvas.getContext('2d').drawImage(vid, 0, 0);
-      const texts = await detector.detect(canvas);
-      for (const t of texts) {
-        const m = t.rawValue.match(/(\d{1,3})\s*\/\s*(\d{1,3})/);
-        if (m) {
-          document.getElementById('searchNum').value = m[0];
+      const vw = vid.videoWidth, vh = vid.videoHeight;
+      if (vw && vh) {
+        // Crop the bottom ~28% (where the "123/197" number is printed) and upscale 2x for sharper OCR
+        const cropH = Math.round(vh * 0.28);
+        canvas.width = vw * 2; canvas.height = cropH * 2;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(vid, 0, vh - cropH, vw, cropH, 0, 0, canvas.width, canvas.height);
+
+        document.getElementById('scanStatus').textContent = '🔎 Reading the number…';
+        const { data: { text } } = await worker.recognize(canvas);
+        const m = text.match(/(\d{1,3})\s*\/\s*(\d{1,3})/);
+        if (m && scanning) {
+          document.getElementById('searchNum').value = m[1] + '/' + m[2];
           stopScanCamera();
-          document.getElementById('scanStatus').textContent = `Scanned: ${m[0]}`;
+          document.getElementById('scanStatus').textContent = `Scanned: ${m[1]}/${m[2]} ✓`;
           doSearch();
           return;
         }
+        if (scanning) document.getElementById('scanStatus').textContent = 'Hold steady on the number (bottom corner)…';
       }
     } catch(e) {}
-    await new Promise(r => setTimeout(r, 700));
+    await new Promise(r => setTimeout(r, 400));
   }
 }
 
