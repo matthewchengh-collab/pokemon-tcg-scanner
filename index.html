@@ -205,7 +205,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v22</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v23</span></p>
 </div>
 
 <div class="nav">
@@ -840,7 +840,10 @@ function renderCardDetail(card) {
   }
   const inColl = isInCollection(card);
   html += `<button class="btn ${inColl ? 'btn-secondary' : 'btn-primary'}" id="collectBtn" onclick="toggleCollection()">${inColl ? '✓ In your collection — tap to remove' : '➕ Add to Collection'}</button>`;
+  const chartKw  = card._jp ? `${card.name} ${card.number} japanese pokemon` : `${card.name} ${card.number} pokemon`;
+  const chartUrl = `https://www.pricecharting.com/search-products?type=prices&q=${encodeURIComponent(chartKw)}`;
   html += `<button class="btn btn-primary" onclick="showTab('condition')">🔬 Assess Condition</button>
+    <button class="btn btn-secondary" onclick="window.open('${chartUrl}','_blank')">📈 Price history (chart)</button>
     <button class="btn btn-secondary" onclick="window.open('${ebayUrl}','_blank')">${card._jp ? 'See sold on eBay →' : 'See on eBay →'}</button>
   </div>`;
 
