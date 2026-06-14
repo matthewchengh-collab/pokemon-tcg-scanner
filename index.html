@@ -204,7 +204,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v28</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v29</span></p>
 </div>
 
 <div class="nav">
@@ -308,6 +308,14 @@
     <input id="apiKeyInput" type="password" placeholder="sk-ant-api03-…" style="font-family:monospace">
     <button class="btn btn-primary" onclick="saveApiKey()">Save Key</button>
     <div id="apiKeyMsg" class="hint" style="margin-top:4px"></div>
+    <div class="divider"></div>
+    <div class="sec" style="margin-bottom:6px">AI model</div>
+    <select id="aiModelSelect" onchange="saveAiModel()" style="width:100%; padding:13px; border-radius:11px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:#fff; font-size:15px">
+      <option value="claude-haiku-4-5">Cheapest — Haiku 4.5 (~$0.003/scan)</option>
+      <option value="claude-sonnet-4-6">Balanced — Sonnet 4.6 (~$0.009/scan)</option>
+      <option value="claude-opus-4-8">Best — Opus 4.8 (~$0.015/scan)</option>
+    </select>
+    <div class="hint" style="margin-top:6px">Used for AI scan, condition grading, authenticity, etc. Pick Sonnet or Opus for tougher cards / more accurate grading.</div>
   </div>
 
   <div class="panel">
@@ -328,7 +336,7 @@
     <div class="sec">About</div>
     <div style="font-size:13px;color:#b8a9e0;line-height:1.7">
       Prices from <b>TCGPlayer</b> via pokemontcg.io.<br>
-      Condition analysis via <b>Claude Haiku</b> (Anthropic).<br>
+      AI features via <b>Claude</b> (Anthropic) — model selectable above.<br>
       ROI uses rough multipliers: PSA 10 ≈ 8×, PSA 9 ≈ 2.5×, PSA 8 ≈ 1.3×.<br>
       Grading ROI estimates are for guidance only.
     </div>
@@ -1271,6 +1279,9 @@ function bestSpeciesMatch(text, species) {
 
 // ✨ Vision card-ID: photograph the whole card, let Claude identify it (English + Japanese)
 // ─── Shared Claude API helpers ───
+// Which Claude model to use for AI features — user-selectable in Settings (cost vs quality).
+function getAiModel() { return localStorage.getItem('ai_model') || 'claude-haiku-4-5'; }
+
 async function callClaude(content, maxTokens = 500) {
   const apiKey = localStorage.getItem('anthropic_api_key');
   if (!apiKey) throw new Error('Add your Claude API key in Settings first.');
@@ -1280,7 +1291,7 @@ async function callClaude(content, maxTokens = 500) {
       'x-api-key': apiKey, 'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true', 'content-type': 'application/json',
     },
-    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: maxTokens,
+    body: JSON.stringify({ model: getAiModel(), max_tokens: maxTokens,
       messages: [{ role: 'user', content }] }),
   });
   if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error?.message || `API error ${resp.status}`); }
@@ -1390,7 +1401,7 @@ If you can't read a field, use "". Base "language" on whether the card text is E
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: getAiModel(),
         max_tokens: 300,
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
@@ -1660,7 +1671,7 @@ Reply ONLY with this JSON object, no markdown, no explanation outside the JSON:
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: getAiModel(),
         max_tokens: 800,
         messages: [{
           role: 'user',
@@ -1846,6 +1857,11 @@ function loadSettings() {
   };
   // reflect offline-data status + relabel button if already downloaded
   idbGet('cards_synced').then(s => { updateOfflineStatus(s); if (offlineIndex) document.getElementById('offlineBtn').textContent = '📥 Re-download (refresh prices)'; }).catch(() => {});
+  document.getElementById('aiModelSelect').value = getAiModel();
+}
+
+function saveAiModel() {
+  localStorage.setItem('ai_model', document.getElementById('aiModelSelect').value);
 }
 
 function saveApiKey() {
