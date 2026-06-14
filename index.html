@@ -172,6 +172,10 @@
     background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); cursor: pointer; }
   .coll-qty .rm { background: rgba(255,138,138,0.15); border-color: rgba(255,138,138,0.4); }
   .coll-qty span { min-width: 18px; text-align: center; font-weight: 700; }
+  .set-row { padding: 9px 0; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .set-row:last-child { border-bottom: none; }
+  .set-bar { height: 7px; background: rgba(255,255,255,0.1); border-radius: 999px; overflow: hidden; }
+  .set-bar-fill { height: 100%; background: linear-gradient(90deg, #ffcb05, #ff9500); border-radius: 999px; transition: width 0.4s ease; }
   .scanstatus { font-size: 13px; color: #ffcb05; text-align: center; min-height: 18px; margin-bottom: 6px; }
 
   /* Cond video / snapshot */
@@ -200,7 +204,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v24</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v25</span></p>
 </div>
 
 <div class="nav">
@@ -531,6 +535,18 @@ function renderResultsList(cards) {
 
 function selectCardByIdx(i) { const c = _searchCards[i]; c._jp ? selectCardJP(c) : selectCard(c); }
 
+// Deal checker: compare a booth's asking price to market value
+function checkDeal(market) {
+  const ask = parseFloat(document.getElementById('dealInput').value);
+  if (!ask || ask <= 0) { document.getElementById('dealResult').innerHTML = ''; return; }
+  const diff = (ask - market) / market * 100;
+  let cls, msg;
+  if (ask <= market * 0.85)      { cls = 'v-green';  msg = `💎 <b>Great deal</b> — about ${Math.abs(diff).toFixed(0)}% below the ~$${market.toFixed(2)} market.`; }
+  else if (ask <= market * 1.10) { cls = 'v-yellow'; msg = `👍 <b>Fair price</b> — within ${Math.abs(diff).toFixed(0)}% of the ~$${market.toFixed(2)} market.`; }
+  else                            { cls = 'v-red';    msg = `⚠️ <b>Overpriced</b> — about ${diff.toFixed(0)}% above the ~$${market.toFixed(2)} market.`; }
+  document.getElementById('dealResult').innerHTML = `<div class="verdict ${cls}" style="margin-top:10px">${msg}<br><span style="font-size:12px;color:#b8a9e0">Market is a guide — check condition and recent eBay sold too.</span></div>`;
+}
+
 function selectCard(card) {
   currentCard = card;
   setResults('');
@@ -602,7 +618,7 @@ function toggleCollection() {
       key: k, name: currentCard.name, number: currentCard.number,
       total: currentCard.set?.printedTotal || '', setName: currentCard.set?.name || '',
       image: currentCard.images?.small || '', jp: !!currentCard._jp,
-      price: p?.market ?? null, qty: 1,
+      price: p?.market ?? null, qty: 1, paid: null,
     });
   }
   saveCollection(coll);
@@ -614,6 +630,20 @@ function changeQty(key, delta) {
   const e = coll.find(x => x.key === key);
   if (!e) return;
   e.qty = Math.max(1, (e.qty || 1) + delta);
+  saveCollection(coll);
+  renderCollection();
+}
+
+// Record what you paid per card → drives profit/loss
+function setPaid(key) {
+  const coll = getCollection();
+  const e = coll.find(x => x.key === key);
+  if (!e) return;
+  const cur = e.paid != null ? e.paid : '';
+  const v = prompt(`What did you pay for "${e.name}" (per card, $)?`, cur);
+  if (v === null) return;
+  const n = parseFloat(v);
+  e.paid = (v.trim() === '' || isNaN(n)) ? null : n;
   saveCollection(coll);
   renderCollection();
 }
@@ -646,8 +676,14 @@ function renderCollection() {
       + backupPanelHtml();
     return;
   }
-  let cards = 0, value = 0, priced = 0;
-  coll.forEach(e => { cards += e.qty; if (e.price != null) { value += e.price * e.qty; priced++; } });
+  let cards = 0, value = 0, priced = 0, invested = 0, valueOfPaid = 0;
+  coll.forEach(e => {
+    cards += e.qty;
+    if (e.price != null) { value += e.price * e.qty; priced++; }
+    if (e.paid != null) { invested += e.paid * e.qty; if (e.price != null) valueOfPaid += e.price * e.qty; }
+  });
+  const pnl = valueOfPaid - invested;
+  const pnlColor = pnl >= 0 ? '#7CFFB2' : '#ff8a8a';
 
   let html = `<div class="panel">
     <div class="coll-summary">
@@ -655,6 +691,10 @@ function renderCollection() {
       <div><div class="big" style="color:#7CFFB2">$${value.toFixed(2)}</div><div class="lbl">est. value</div></div>
       <div><div class="big">${coll.length}</div><div class="lbl">unique</div></div>
     </div>
+    ${invested > 0 ? `<div class="coll-summary" style="margin-top:10px;border-top:1px solid rgba(255,255,255,0.08);padding-top:10px">
+      <div><div class="big" style="font-size:18px">$${invested.toFixed(2)}</div><div class="lbl">invested</div></div>
+      <div><div class="big" style="font-size:18px;color:${pnlColor}">${pnl >= 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(2)}</div><div class="lbl">profit / loss</div></div>
+    </div>` : ''}
     ${priced < coll.length ? `<div class="hint" style="margin-top:8px">${coll.length - priced} card(s) have no price (e.g. Japanese) and aren't in the total.</div>` : ''}
     <button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="refreshCollectionPrices()">🔄 Refresh prices (uses internet)</button>
     ${localStorage.getItem('anthropic_api_key') ? `<button class="btn btn-primary btn-sm" style="margin-top:8px; background:linear-gradient(135deg,#a06bff 0%,#ff6bcb 100%); color:#fff" onclick="analyzeCollectionAI()">✨ Analyze my collection (AI)</button>` : ''}
@@ -683,22 +723,58 @@ function renderCollection() {
     html += '</div>';
   }
 
+  // ── Set completion ──
+  const sets = {};
+  coll.forEach(e => {
+    if (e.jp || !e.setName) return;
+    const tot = parseInt(e.total) || 0;
+    if (!sets[e.setName]) sets[e.setName] = { total: tot, nums: new Set() };
+    if (tot > sets[e.setName].total) sets[e.setName].total = tot;
+    const n = parseInt(e.number); if (!isNaN(n)) sets[e.setName].nums.add(n);
+  });
+  const setList = Object.entries(sets).filter(([, s]) => s.total > 0)
+    .sort((a, b) => (b[1].nums.size / b[1].total) - (a[1].nums.size / a[1].total));
+  if (setList.length) {
+    html += `<div class="panel"><div class="sec">📚 Set completion</div>`;
+    setList.forEach(([name, s]) => {
+      const owned = s.nums.size, pct = Math.min(100, Math.round(owned / s.total * 100));
+      html += `<div class="set-row" onclick="viewSetMissing('${name.replace(/'/g, "\\'")}')">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span style="font-weight:600">${name}</span><span style="color:#b8a9e0">${owned}/${s.total} · ${pct}%</span>
+        </div>
+        <div class="set-bar"><div class="set-bar-fill" style="width:${pct}%"></div></div>
+      </div>`;
+    });
+    html += `<div class="hint" style="margin-top:8px">Tap a set to see which cards you're missing.</div></div>`;
+  }
+
   html += '<div class="panel"><div class="sec">Your cards</div>';
   coll.forEach(e => {
     const val = e.price != null ? `$${(e.price * e.qty).toFixed(2)}` : (e.jp ? '🇯🇵 —' : '—');
     const img = e.image ? `<img src="${e.image}" loading="lazy" decoding="async" onerror="this.style.visibility='hidden'">` : `<div class="result-thumb"></div>`;
+    const k = e.key.replace(/'/g, "\\'");
+    // paid / profit-loss line
+    let paidLine;
+    if (e.paid != null) {
+      const pl = (e.price != null) ? (e.price - e.paid) * e.qty : null;
+      const plStr = pl != null ? ` · <span style="color:${pl >= 0 ? '#7CFFB2' : '#ff8a8a'}">${pl >= 0 ? '+' : '−'}$${Math.abs(pl).toFixed(2)}</span>` : '';
+      paidLine = `<span onclick="setPaid('${k}')" style="cursor:pointer;color:#b8a9e0">paid $${e.paid.toFixed(2)}${plStr} ✎</span>`;
+    } else {
+      paidLine = `<span onclick="setPaid('${k}')" style="cursor:pointer;color:#8a7fb0">+ add paid price</span>`;
+    }
     html += `<div class="coll-item">
       ${img}
       <div class="coll-info">
         <div class="coll-name">${e.name}</div>
         <div class="coll-sub">${e.setName || (e.jp ? 'Japanese' : '')} · #${e.number}</div>
         <div class="coll-val">${val}${e.price != null && e.qty > 1 ? ` <span style="color:#8a7fb0">($${e.price.toFixed(2)} ea)</span>` : ''}</div>
+        <div style="font-size:11px;margin-top:2px">${paidLine}</div>
       </div>
       <div class="coll-qty">
-        <button onclick="changeQty('${e.key.replace(/'/g, "\\'")}', -1)">−</button>
+        <button onclick="changeQty('${k}', -1)">−</button>
         <span>${e.qty}</span>
-        <button onclick="changeQty('${e.key.replace(/'/g, "\\'")}', 1)">+</button>
-        <button class="rm" onclick="removeFromCollection('${e.key.replace(/'/g, "\\'")}')">🗑</button>
+        <button onclick="changeQty('${k}', 1)">+</button>
+        <button class="rm" onclick="removeFromCollection('${k}')">🗑</button>
       </div>
     </div>`;
   });
@@ -706,6 +782,22 @@ function renderCollection() {
 
   html += backupPanelHtml();
   el.innerHTML = html;
+}
+
+async function viewSetMissing(setName) {
+  showAiModal(`📚 ${setName}`, '<div class="loading">Loading set…</div>');
+  try {
+    const coll = getCollection();
+    const ownedNums = new Set(coll.filter(e => e.setName === setName && !e.jp).map(e => parseInt(e.number)).filter(n => !isNaN(n)));
+    const cards = await fetchCards(`set.name:"${setName}"`, 250);
+    if (!cards.length) { showAiModal(`📚 ${setName}`, 'Could not load this set (need internet).'); return; }
+    const all = cards.map(c => ({ num: parseInt(c.number), name: c.name })).filter(c => !isNaN(c.num)).sort((a, b) => a.num - b.num);
+    const missing = all.filter(c => !ownedNums.has(c.num));
+    let body = `<div style="margin-bottom:10px">You have <b>${all.length - missing.length}</b> of <b>${all.length}</b> cards.</div>`;
+    if (!missing.length) body += '<div class="verdict v-green">🎉 Set complete — nice!</div>';
+    else { body += '<div class="sec">Missing</div>' + missing.map(c => `<div class="price-row"><span>#${c.num}&nbsp; ${c.name}</span></div>`).join(''); }
+    showAiModal(`📚 ${setName}`, body);
+  } catch(e) { showAiModal(`📚 ${setName}`, 'Failed: ' + e.message); }
 }
 
 function exportCollection() {
@@ -809,6 +901,14 @@ function renderCardDetail(card) {
     if (v >= 25) html += `<div class="verdict v-green">💎 <b>Possibly worth grading</b> — $${v.toFixed(2)} raw. Tap Condition to check your copy.</div>`;
     else if (v >= 8) html += `<div class="verdict v-yellow">🤔 <b>Maybe</b> — at $${v.toFixed(2)}, only worth grading if it's near-perfect.</div>`;
     else html += `<div class="verdict v-red">📦 <b>Not worth grading</b> — at $${v.toFixed(2)}, grading fees exceed upside.</div>`;
+
+    // Deal checker — is a booth's asking price fair?
+    html += `<div class="divider"></div><div class="sec">💰 Deal checker</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="dealInput" type="number" inputmode="decimal" placeholder="Asking price $" style="margin:0">
+        <button class="btn btn-primary btn-sm" style="margin:0" onclick="checkDeal(${p.market})">Check</button>
+      </div>
+      <div id="dealResult"></div>`;
   }
 
   const ebayKw  = card._jp ? `${card.name} ${card.number} japanese pokemon` : `${card.name} ${card.number} pokemon`;
@@ -1271,7 +1371,7 @@ function addCardEntry(card) {
   if (existing) { existing.qty = (existing.qty || 1) + 1; saveCollection(coll); return 'bumped'; }
   const p = bestPrice(card);
   coll.unshift({ key: k, name: card.name, number: card.number, total: card.set?.printedTotal || '',
-    setName: card.set?.name || '', image: card.images?.small || '', jp: !!card._jp, price: p?.market ?? null, qty: 1 });
+    setName: card.set?.name || '', image: card.images?.small || '', jp: !!card._jp, price: p?.market ?? null, qty: 1, paid: null });
   saveCollection(coll);
   return 'added';
 }
