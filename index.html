@@ -186,6 +186,17 @@
 
   .loading { text-align: center; color: #b8a9e0; padding: 24px; animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+  /* AI modal */
+  .ai-modal { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);
+    display: flex; align-items: center; justify-content: center; padding: 18px; }
+  .ai-modal-box { background: linear-gradient(180deg, #251a40, #1c1730); border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 18px; padding: 16px; max-width: 460px; width: 100%; max-height: 80vh; overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .ai-modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .ai-modal-head span { font-weight: 800; font-size: 17px; }
+  .ai-modal-head button { background: rgba(255,255,255,0.1); border: none; color: #fff; width: 30px; height: 30px;
+    border-radius: 9px; font-size: 14px; cursor: pointer; }
+  #aiModalBody { font-size: 14px; line-height: 1.6; color: #e8e2f5; }
   .err { color: #ff8a8a; font-size: 14px; padding: 8px 0; }
   .api-warn { background: rgba(255,203,5,0.1); border: 1px solid rgba(255,203,5,0.3); border-radius: 12px; padding: 12px; font-size: 13px; margin-bottom: 10px; }
 </style>
@@ -194,7 +205,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v21</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v22</span></p>
 </div>
 
 <div class="nav">
@@ -233,6 +244,7 @@
   <div id="scanCaptureRow" style="display:none; flex-direction:column; gap:8px">
     <div class="scanstatus" id="scanStatus" style="margin:0 0 2px"></div>
     <button class="btn btn-primary" id="scanAiBtn" style="margin:0; display:none; background:linear-gradient(135deg,#a06bff 0%,#ff6bcb 100%); color:#fff" onclick="aiScanCard()">✨ AI scan — fit the whole card in view</button>
+    <button class="btn btn-secondary btn-sm" id="scanBatchBtn" style="margin:0; display:none" onclick="batchScan()">🗂 Batch scan (many cards → collection)</button>
     <div class="hint" id="scanAiHint" style="display:none; text-align:center; margin:0">✨ Want one-tap AI scan? Add your API key in ⚙️ Settings on this phone.</div>
     <div style="display:flex; gap:8px">
       <button class="btn btn-secondary btn-sm" id="scanNameBtn" style="margin:0" onclick="captureAndRead('name')">🃏 Read name</button>
@@ -659,6 +671,7 @@ function renderCollection() {
     </div>
     ${priced < coll.length ? `<div class="hint" style="margin-top:8px">${coll.length - priced} card(s) have no price (e.g. Japanese) and aren't in the total.</div>` : ''}
     <button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="refreshCollectionPrices()">🔄 Refresh prices (uses internet)</button>
+    ${localStorage.getItem('anthropic_api_key') ? `<button class="btn btn-primary btn-sm" style="margin-top:8px; background:linear-gradient(135deg,#a06bff 0%,#ff6bcb 100%); color:#fff" onclick="analyzeCollectionAI()">✨ Analyze my collection (AI)</button>` : ''}
   </div>`;
 
   // ── Worth grading? — flag cards valuable enough that a high grade could pay off ──
@@ -815,9 +828,15 @@ function renderCardDetail(card) {
   const ebayKw  = card._jp ? `${card.name} ${card.number} japanese pokemon` : `${card.name} ${card.number} pokemon`;
   const ebayUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(ebayKw)}` + (card._jp ? '&LH_Sold=1&LH_Complete=1' : '');
   html += '<div style="margin-top:16px">';
+  const hasKey = !!localStorage.getItem('anthropic_api_key');
   // one-tap: grade this card straight from the scan photo (same photo, no re-shoot)
-  if (lastScanPhoto && localStorage.getItem('anthropic_api_key')) {
+  if (lastScanPhoto && hasKey) {
     html += `<button class="btn btn-primary" style="background:linear-gradient(135deg,#a06bff 0%,#ff6bcb 100%);color:#fff" onclick="gradeFromScan()">✨ Grade this card from your scan</button>`;
+    html += `<button class="btn btn-secondary" onclick="checkAuthenticity()">🔍 Check if genuine (from your scan)</button>`;
+  }
+  // Japanese cards: AI translation to English
+  if (card._jp && hasKey) {
+    html += `<button class="btn btn-secondary" onclick="translateCard()">🌐 Translate to English (AI)</button>`;
   }
   const inColl = isInCollection(card);
   html += `<button class="btn ${inColl ? 'btn-secondary' : 'btn-primary'}" id="collectBtn" onclick="toggleCollection()">${inColl ? '✓ In your collection — tap to remove' : '➕ Add to Collection'}</button>`;
@@ -887,6 +906,7 @@ async function toggleScanCamera() {
     // AI scan (whole card, EN+JP) available when an API key is saved; otherwise explain why it's missing
     const hasKey = !!localStorage.getItem('anthropic_api_key');
     document.getElementById('scanAiBtn').style.display = hasKey ? 'block' : 'none';
+    document.getElementById('scanBatchBtn').style.display = hasKey ? 'block' : 'none';
     document.getElementById('scanAiHint').style.display = hasKey ? 'none' : 'block';
     // name OCR is English-only; in JP mode offer number-scan only
     const jp = lang === 'jp';
@@ -1056,6 +1076,45 @@ function bestSpeciesMatch(text, species) {
 }
 
 // ✨ Vision card-ID: photograph the whole card, let Claude identify it (English + Japanese)
+// ─── Shared Claude API helpers ───
+async function callClaude(content, maxTokens = 500) {
+  const apiKey = localStorage.getItem('anthropic_api_key');
+  if (!apiKey) throw new Error('Add your Claude API key in Settings first.');
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey, 'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true', 'content-type': 'application/json',
+    },
+    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: maxTokens,
+      messages: [{ role: 'user', content }] }),
+  });
+  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error?.message || `API error ${resp.status}`); }
+  const data = await resp.json();
+  return data.content?.find(b => b.type === 'text')?.text || '';
+}
+const imgBlock = (base64) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } });
+function parseJsonReply(txt) { const m = txt.match(/[\[{][\s\S]*[\]}]/); if (!m) throw new Error('Could not parse AI response'); return JSON.parse(m[0]); }
+async function urlToBase64(url) {
+  const blob = await fetch(url).then(r => r.blob());
+  return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(',')[1]); fr.onerror = rej; fr.readAsDataURL(blob); });
+}
+
+// Simple reusable modal for AI text results
+function showAiModal(title, bodyHtml) {
+  document.getElementById('aiModalTitle').textContent = title;
+  document.getElementById('aiModalBody').innerHTML = bodyHtml;
+  document.getElementById('aiModal').style.display = 'flex';
+}
+function closeAiModal() { document.getElementById('aiModal').style.display = 'none'; }
+// minimal markdown-ish → html (bold, bullets, line breaks)
+function mdToHtml(t) {
+  return t.replace(/[<>]/g, c => ({ '<': '&lt;', '>': '&gt;' }[c]))
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/^[\-\*] (.+)$/gm, '• $1')
+    .replace(/\n/g, '<br>');
+}
+
 // Draw an image source to a JPEG dataURL capped at maxEdge px (Claude's optimal)
 function srcToDataUrl(src, w, h, maxEdge) {
   const scale = Math.min(1, maxEdge / Math.max(w, h));
@@ -1170,6 +1229,105 @@ If you can't read a field, use "". Base "language" on whether the card text is E
     unfreezeScan();
     status.textContent = `AI scan failed: ${e.message}. Check your key/credit in Settings, or use Read name / number.`;
   }
+}
+
+// ═══ Feature: Multi-card batch scan ═══
+async function batchScan() {
+  if (!localStorage.getItem('anthropic_api_key')) { alert('Add your Claude API key in Settings to use batch scan.'); return; }
+  const vid = document.getElementById('scanVideo');
+  if (!vid.videoWidth) { document.getElementById('scanStatus').textContent = 'Camera still warming up — try again'; return; }
+  document.getElementById('scanStatus').textContent = '📸 Capturing…';
+  const dataUrl = await captureSharpStill(scanTrack, vid, 1568);
+  lastScanPhoto = dataUrl;
+  freezeScan(dataUrl, '🗂 Identifying all cards…');
+  try {
+    const prompt = `Identify EVERY distinct Pokémon card visible in this photo (e.g. a binder page or several cards laid out). For each card, read its collector number near a bottom corner if legible.
+Reply with ONLY a JSON array, no other text:
+[{"language":"english" or "japanese","name":"English Pokémon/card name","number":"collector numerator e.g. 3","total":"set total e.g. 91"}]
+Include every card you can see; use "" for fields you can't read.`;
+    const list = parseJsonReply(await callClaude([imgBlock(dataUrl.split(',')[1]), { type: 'text', text: prompt }], 1500));
+    stopScanCamera();
+    if (!Array.isArray(list) || !list.length) { showAiModal('🗂 Batch scan', 'No cards detected. Try better lighting and fit the cards in frame.'); return; }
+    showAiModal('🗂 Adding cards…', `<div class="loading">Looking up ${list.length} card(s)…</div>`);
+    let added = 0, bumped = 0;
+    for (const id of list) {
+      const card = await lookupIdentified(id);
+      (addCardEntry(card) === 'added') ? added++ : bumped++;
+    }
+    renderHistory();
+    showAiModal('🗂 Batch scan complete', `Added <b>${added}</b> new card(s)${bumped ? `, +${bumped} to existing` : ''} to your Collection.<br><br><button class="btn btn-primary" onclick="closeAiModal();showTab('collection')">View Collection →</button>`);
+  } catch(e) {
+    unfreezeScan();
+    document.getElementById('scanStatus').textContent = `Batch scan failed: ${e.message}`;
+  }
+}
+
+async function lookupIdentified(id) {
+  const num = (id.number || '').toString().replace(/[^0-9]/g, '').replace(/^0+(?=\d)/, '');
+  const tot = (id.total  || '').toString().replace(/[^0-9]/g, '');
+  if (id.language !== 'japanese' && id.name) {
+    try {
+      const q = tot ? `name:"${id.name}" number:${num} set.printedTotal:${tot}`
+                    : (num ? `name:"${id.name}" number:${num}` : `name:"${id.name}"`);
+      const cards = await fetchCards(q, 1);
+      if (cards[0]) return cards[0];
+    } catch(e) {}
+  }
+  return { name: id.name || 'Unknown card', number: num || '?',
+    set: { name: id.language === 'japanese' ? 'Japanese' : '', printedTotal: tot },
+    images: {}, _jp: id.language === 'japanese', tcgplayer: null };
+}
+
+function addCardEntry(card) {
+  const k = collKey(card);
+  const coll = getCollection();
+  const existing = coll.find(e => e.key === k);
+  if (existing) { existing.qty = (existing.qty || 1) + 1; saveCollection(coll); return 'bumped'; }
+  const p = bestPrice(card);
+  coll.unshift({ key: k, name: card.name, number: card.number, total: card.set?.printedTotal || '',
+    setName: card.set?.name || '', image: card.images?.small || '', jp: !!card._jp, price: p?.market ?? null, qty: 1 });
+  saveCollection(coll);
+  return 'added';
+}
+
+// ═══ Feature: Japanese card translation ═══
+async function translateCard() {
+  if (!currentCard) return;
+  if (!localStorage.getItem('anthropic_api_key')) { alert('Add your Claude API key in Settings.'); return; }
+  showAiModal('🌐 Translating…', '<div class="loading">Reading the card…</div>');
+  try {
+    let b64;
+    if (lastScanPhoto) b64 = lastScanPhoto.split(',')[1];
+    else if (currentCard.images?.large || currentCard.images?.small) b64 = await urlToBase64(currentCard.images.large || currentCard.images.small);
+    else throw new Error('No card image available.');
+    const prompt = `This is a Japanese Pokémon card. Translate it to English. Give: the card name, type, HP, and a short plain-English description of its attacks/abilities and any notable text. Be concise. Use ** for the name.`;
+    showAiModal('🌐 Translation', mdToHtml(await callClaude([imgBlock(b64), { type: 'text', text: prompt }], 600)));
+  } catch(e) { showAiModal('🌐 Translation', 'Failed: ' + e.message); }
+}
+
+// ═══ Feature: Analyze my collection ═══
+async function analyzeCollectionAI() {
+  const coll = getCollection();
+  if (!coll.length) { alert('Add some cards to your collection first.'); return; }
+  if (!localStorage.getItem('anthropic_api_key')) { alert('Add your Claude API key in Settings.'); return; }
+  showAiModal('✨ Analyzing…', '<div class="loading">Reviewing your collection…</div>');
+  try {
+    const slim = coll.map(e => ({ name: e.name, set: e.setName, num: e.number, price: e.price, qty: e.qty, jp: e.jp }));
+    const prompt = `Here is my Pokémon card collection as JSON:\n${JSON.stringify(slim)}\n\nGive a short, friendly report for a collector: total estimated value, my standout/most valuable cards, which are worth grading and why, any sets I might be close to completing, and 2-3 suggestions. Use brief markdown (** for bold, - for bullets). Under 220 words.`;
+    showAiModal('✨ Collection report', mdToHtml(await callClaude([{ type: 'text', text: prompt }], 700)));
+  } catch(e) { showAiModal('✨ Collection report', 'Failed: ' + e.message); }
+}
+
+// ═══ Feature: Authenticity / fake check ═══
+async function checkAuthenticity() {
+  if (!lastScanPhoto) { alert('Authenticity needs your own photo — use ✨ AI scan on the card first, then tap this.'); return; }
+  if (!localStorage.getItem('anthropic_api_key')) { alert('Add your Claude API key in Settings.'); return; }
+  showAiModal('🔍 Checking…', '<div class="loading">Examining the card…</div>');
+  try {
+    const prompt = `Examine this photo of a Pokémon card for signs it may be counterfeit: colour accuracy, text/font sharpness, holo/foil pattern, border alignment, print-dot quality, and card material/edges.
+Reply with a one-line **VERDICT** (exactly one of: Looks genuine / Some concerns / Likely fake), then 3-5 short "- " bullet reasons. End with one line noting this is an automated visual check, not a guarantee.`;
+    showAiModal('🔍 Authenticity check', mdToHtml(await callClaude([imgBlock(lastScanPhoto.split(',')[1]), { type: 'text', text: prompt }], 500)));
+  } catch(e) { showAiModal('🔍 Authenticity check', 'Failed: ' + e.message); }
 }
 
 // Freeze the live preview behind a still + spinner during the AI call; unfreeze to retry
@@ -1526,5 +1684,13 @@ setLang(localStorage.getItem('card_lang') || 'en');
 renderHistory();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
+
+<!-- AI result modal -->
+<div id="aiModal" class="ai-modal" style="display:none" onclick="if(event.target===this)closeAiModal()">
+  <div class="ai-modal-box">
+    <div class="ai-modal-head"><span id="aiModalTitle"></span><button onclick="closeAiModal()">✖</button></div>
+    <div id="aiModalBody"></div>
+  </div>
+</div>
 </body>
 </html>
