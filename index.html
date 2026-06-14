@@ -62,11 +62,6 @@
   .btn-secondary { transition: transform 0.12s ease, background 0.15s ease; }
   .btn-secondary:active { background: rgba(255,255,255,0.16); }
 
-  /* Language toggle */
-  .lang-toggle { display: flex; gap: 8px; margin-bottom: 12px; }
-  .lang-btn { flex: 1; padding: 10px; border-radius: 11px; font-size: 14px; font-weight: 600; cursor: pointer;
-    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15); color: #b8a9e0; }
-  .lang-btn.active { background: linear-gradient(135deg, #ffcb05 0%, #ff9500 100%); color: #1a1c2e; border-color: transparent; }
 
   /* Section label */
   .sec { font-size: 12px; font-weight: 700; color: #b8a9e0; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px; }
@@ -205,7 +200,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v23</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v24</span></p>
 </div>
 
 <div class="nav">
@@ -219,13 +214,9 @@
 <div class="page active" id="page-search">
   <div class="panel" id="findPanel">
     <div class="sec">Find a Card</div>
-    <div class="lang-toggle">
-      <button class="lang-btn active" id="langEn" onclick="setLang('en')">🇺🇸 English</button>
-      <button class="lang-btn"        id="langJp" onclick="setLang('jp')">🇯🇵 Japanese</button>
-    </div>
-    <input id="searchName" placeholder="Card name — e.g. Charizard, Pikachu" inputmode="search">
+    <input id="searchName" placeholder="Card name — English or Japanese (リザードン)" inputmode="search">
     <input id="searchNum"  placeholder="Card number — e.g. 4/102 (optional)" inputmode="text" style="margin-bottom:6px">
-    <div class="hint" id="searchHint" style="margin-bottom:10px">Name search finds all versions. Add a number to narrow down.</div>
+    <div class="hint" id="searchHint" style="margin-bottom:10px">Language is auto-detected. Japanese names search Japanese cards; add a number to narrow down.</div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-primary" style="margin:0" onclick="doSearch()">Search</button>
       <button class="btn btn-secondary btn-sm" id="scanToggleBtn" onclick="toggleScanCamera()">📷 Scan card</button>
@@ -339,7 +330,6 @@
 // ══════════════════════════════════════════════════════════
 const TCGAPI = 'https://api.pokemontcg.io/v2/cards';
 const JPAPI  = 'https://api.tcgdex.net/v2/ja/cards';
-let lang         = 'en';
 let currentCard  = null;
 let scanStream   = null, scanning = false;
 let condStream   = null, condCameraOn = false, condPhoto = null;
@@ -372,22 +362,10 @@ function showTab(tab) {
 // ══════════════════════════════════════════════════════════
 //  Search
 // ══════════════════════════════════════════════════════════
-function setLang(l) {
-  lang = l;
-  localStorage.setItem('card_lang', l);
-  document.getElementById('langEn').classList.toggle('active', l === 'en');
-  document.getElementById('langJp').classList.toggle('active', l === 'jp');
-  const nameInput = document.getElementById('searchName');
-  const hint = document.getElementById('searchHint');
-  if (l === 'jp') {
-    nameInput.placeholder = 'Japanese name (リザードン) — or just use the number';
-    hint.innerHTML = '🇯🇵 Type the <b>full number incl. total</b> (e.g. 3/165) for an exact match. English names won\'t match Japanese cards — use the number or paste the Japanese name.';
-  } else {
-    nameInput.placeholder = 'Card name — e.g. Charizard, Pikachu';
-    hint.textContent = 'Name search finds all versions. Add a number to narrow down.';
-  }
-}
+// Japanese script (hiragana, katakana, CJK) → search Japanese cards
+function hasJapanese(s) { return /[぀-ヿ㐀-鿿ｦ-ﾟ]/.test(s); }
 
+// Dispatcher: auto-detect language from what was typed, then route to the right database
 async function doSearch() {
   const name = document.getElementById('searchName').value.trim();
   const num  = document.getElementById('searchNum').value.trim();
@@ -396,8 +374,11 @@ async function doSearch() {
   setResults('<div class="loading">🔍 Searching…</div>');
   document.getElementById('cardDetail').innerHTML = '';
 
-  if (lang === 'jp') { return doSearchJP(name, num); }
+  if (hasJapanese(name)) return doSearchJP(name, num);   // Japanese name → JP DB
+  return doSearchEN(name, num);                          // Latin name / number → EN DB (JP fallback offered)
+}
 
+async function doSearchEN(name, num) {
   try {
     // "003/091" → number 3, set size 91. Strip leading zeros; the denominator (set total) pins the set.
     const parts   = num.split('/');
@@ -422,7 +403,12 @@ async function doSearch() {
       cards = await fetchCards(`name:${encodeURIComponent(name)}*`, 20);
     }
 
-    if (!cards.length) { setResults('<div class="err">No cards found. Try a different name.</div>'); return; }
+    if (!cards.length) {
+      // number-only with no English match → it may be a Japanese card; offer the JP lookup
+      const jpHint = num ? `<br><button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="doSearchJP('', '${num.replace(/'/g, '')}')">🇯🇵 Search Japanese cards instead</button>` : '';
+      setResults(`<div class="err">No cards found.${num ? ' Double-check the number,' : ' Try a different name'} ${num ? 'or:' : '.'}${jpHint}</div>`);
+      return;
+    }
 
     _searchCards = cards;
     if (cards.length === 1) { selectCard(cards[0]); return; }
@@ -587,10 +573,10 @@ function renderHistory() {
 function openHistory(i) {
   const h = JSON.parse(localStorage.getItem('scan_history') || '[]')[i];
   if (!h) return;
-  setLang(h.jp ? 'jp' : 'en');
   document.getElementById('searchName').value = h.jp ? '' : h.name;
   document.getElementById('searchNum').value  = h.total ? `${h.number}/${h.total}` : (h.number || '');
-  doSearch();
+  const numStr = h.total ? `${h.number}/${h.total}` : (h.number || '');
+  h.jp ? doSearchJP('', numStr) : doSearchEN(h.name, numStr);
 }
 
 function clearHistory() {
@@ -911,12 +897,8 @@ async function toggleScanCamera() {
     document.getElementById('scanAiBtn').style.display = hasKey ? 'block' : 'none';
     document.getElementById('scanBatchBtn').style.display = hasKey ? 'block' : 'none';
     document.getElementById('scanAiHint').style.display = hasKey ? 'none' : 'block';
-    // name OCR is English-only; in JP mode offer number-scan only
-    const jp = lang === 'jp';
-    document.getElementById('scanNameBtn').style.display = jp ? 'none' : 'block';
-    document.getElementById('scanStatus').textContent = jp
-      ? 'Line your whole card up in the box, then tap Read number'
-      : 'Line your whole card up in the box, then tap Read name or Read number';
+    document.getElementById('scanNameBtn').style.display = 'block';
+    document.getElementById('scanStatus').textContent = 'Line your whole card up in the box, then tap a button';
     getOcrWorker().catch(() => {});   // warm up OCR in the background while they aim
     getSpecies().catch(() => {});     // preload the Pokémon name list for matching
   } catch(e) {
@@ -1222,12 +1204,13 @@ If you can't read a field, use "". Base "language" on whether the card text is E
     if (!num && !id.name) { unfreezeScan(); status.textContent = "AI couldn't identify the card — try again with the whole card in clear view."; return; }
 
     stopScanCamera();
-    setLang(id.language === 'japanese' ? 'jp' : 'en');
+    const isJP = id.language === 'japanese';
+    const numStr = num ? (tot ? `${num}/${tot}` : num) : '';
     // number is the precise key; name helps for English
-    document.getElementById('searchNum').value  = num ? (tot ? `${num}/${tot}` : num) : '';
-    document.getElementById('searchName').value = (id.language !== 'japanese' && id.name) ? id.name : '';
+    document.getElementById('searchNum').value  = numStr;
+    document.getElementById('searchName').value = (!isJP && id.name) ? id.name : '';
     status.textContent = `✨ Identified: ${id.name || ''} ${num ? `#${num}${tot ? '/' + tot : ''}` : ''} ✓`;
-    doSearch();
+    isJP ? doSearchJP('', numStr) : doSearchEN(id.name || '', numStr);   // route by detected language
   } catch(e) {
     unfreezeScan();
     status.textContent = `AI scan failed: ${e.message}. Check your key/credit in Settings, or use Read name / number.`;
@@ -1683,7 +1666,6 @@ function getGradeCost() {
 
 // Init
 loadSettings();
-setLang(localStorage.getItem('card_lang') || 'en');
 renderHistory();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
