@@ -204,7 +204,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v26</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v27</span></p>
 </div>
 
 <div class="nav">
@@ -241,7 +241,7 @@
     <button class="btn btn-primary" id="scanAiBtn" style="margin:0; display:none; background:linear-gradient(135deg,#a06bff 0%,#ff6bcb 100%); color:#fff" onclick="aiScanCard()">✨ AI scan — fit the whole card in view</button>
     <button class="btn btn-secondary btn-sm" id="scanBatchBtn" style="margin:0; display:none" onclick="batchScan()">🗂 Batch scan (many cards → collection)</button>
     <div class="hint" id="scanAiHint" style="display:none; text-align:center; margin:0">✨ Want one-tap AI scan? Add your API key in ⚙️ Settings on this phone.</div>
-    <div style="display:flex; gap:8px">
+    <div id="scanOcrRow" style="display:flex; gap:8px">
       <button class="btn btn-secondary btn-sm" id="scanNameBtn" style="margin:0" onclick="captureAndRead('name')">🃏 Read name</button>
       <button class="btn btn-secondary btn-sm" style="margin:0" onclick="captureAndRead('number')">🔢 Read number</button>
     </div>
@@ -1090,15 +1090,18 @@ async function toggleScanCamera() {
     row.classList.add('fixed');                                    // pin controls to the bottom
     document.getElementById('page-search').classList.add('scanning');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    // AI scan (whole card, EN+JP) available when an API key is saved; otherwise explain why it's missing
+    // With a key: AI scan replaces the finicky OCR buttons. Without one: OCR is the free fallback.
     const hasKey = !!localStorage.getItem('anthropic_api_key');
     document.getElementById('scanAiBtn').style.display = hasKey ? 'block' : 'none';
     document.getElementById('scanBatchBtn').style.display = hasKey ? 'block' : 'none';
     document.getElementById('scanAiHint').style.display = hasKey ? 'none' : 'block';
     document.getElementById('scanNameBtn').style.display = 'block';
-    document.getElementById('scanStatus').textContent = 'Line your whole card up in the box, then tap a button';
-    getOcrWorker().catch(() => {});   // warm up OCR in the background while they aim
-    getSpecies().catch(() => {});     // preload the Pokémon name list for matching
+    document.getElementById('scanOcrRow').style.display = hasKey ? 'none' : 'flex';   // hide OCR when AI is available
+    document.querySelectorAll('.band').forEach(b => b.style.display = hasKey ? 'none' : 'flex');
+    document.getElementById('scanStatus').textContent = hasKey
+      ? 'Fit the whole card in the box, then tap ✨ AI scan'
+      : 'Line your whole card up in the box, then tap a button';
+    if (!hasKey) { getOcrWorker().catch(() => {}); getSpecies().catch(() => {}); }   // only warm OCR when it's actually used
   } catch(e) {
     document.getElementById('scanStatus').textContent = 'Camera blocked — type the name or number instead';
   }
