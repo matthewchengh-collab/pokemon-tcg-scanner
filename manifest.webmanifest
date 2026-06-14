@@ -1,0 +1,14 @@
+{
+  "name": "Pokémon Card Scanner",
+  "short_name": "Card Scanner",
+  "description": "Scan Pokémon cards for value, grading, and collection tracking.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1a1c2e",
+  "theme_color": "#1a1c2e",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

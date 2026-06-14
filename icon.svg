@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- maskable: keep art within the centre ~80% safe zone -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a1c2e"/>
+      <stop offset="1" stop-color="#2d1b4e"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffcb05"/>
+      <stop offset="1" stop-color="#ff9500"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- card -->
+  <rect x="170" y="120" width="172" height="240" rx="20" fill="#ffffff" opacity="0.10" stroke="#ffcb05" stroke-width="6"/>
+  <!-- lightning bolt -->
+  <path d="M286 150 L196 286 L248 286 L226 366 L320 226 L264 226 Z" fill="url(#bolt)"/>
+</svg>

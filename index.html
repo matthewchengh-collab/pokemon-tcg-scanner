@@ -6,6 +6,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
+<meta name="theme-color" content="#1a1c2e">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.svg">
 <title>Pokemon Card Scanner</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
@@ -181,7 +184,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v18</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v19</span></p>
 </div>
 
 <div class="nav">
@@ -612,6 +615,18 @@ function removeFromCollection(key) {
   renderCollection();
 }
 
+function backupPanelHtml() {
+  return `<div class="panel">
+    <div class="sec">💾 Backup & Sync</div>
+    <div class="hint" style="margin-bottom:8px">Your collection is saved only on this phone. Export a code to back it up, or paste a code from your other phone to merge it in.</div>
+    <button class="btn btn-secondary btn-sm" onclick="exportCollection()">📤 Export backup code</button>
+    <textarea id="backupOut" readonly style="display:none; width:100%; height:70px; margin:8px 0; font-family:monospace; font-size:11px; padding:10px; border-radius:11px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:#fff;"></textarea>
+    <div class="divider"></div>
+    <textarea id="backupIn" placeholder="Paste a backup code here to restore/merge…" style="width:100%; height:60px; margin-bottom:8px; font-family:monospace; font-size:11px; padding:10px; border-radius:11px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:#fff;"></textarea>
+    <button class="btn btn-secondary btn-sm" onclick="importCollection()">📥 Restore / merge from code</button>
+  </div>`;
+}
+
 function renderCollection() {
   const coll = getCollection();
   const el = document.getElementById('page-collection');
@@ -619,7 +634,8 @@ function renderCollection() {
     el.innerHTML = `<div class="panel" style="text-align:center;padding:28px">
       <div style="font-size:36px;margin-bottom:10px">📚</div>
       <div style="font-weight:700;margin-bottom:6px">No cards yet</div>
-      <div class="hint">Find a card in Search, then tap <b>➕ Add to Collection</b>.</div></div>`;
+      <div class="hint">Find a card in Search, then tap <b>➕ Add to Collection</b>. Or restore a backup below.</div></div>`
+      + backupPanelHtml();
     return;
   }
   let cards = 0, value = 0, priced = 0;
@@ -635,7 +651,30 @@ function renderCollection() {
     <button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="refreshCollectionPrices()">🔄 Refresh prices (uses internet)</button>
   </div>`;
 
-  html += '<div class="panel">';
+  // ── Worth grading? — flag cards valuable enough that a high grade could pay off ──
+  const fee = getGradeCost();
+  const threshold = Math.max(25, fee * 1.5);
+  const worth = coll.filter(e => e.price != null && e.price >= threshold)
+                    .sort((a, b) => b.price - a.price);
+  if (worth.length) {
+    html += `<div class="panel">
+      <div class="sec">💎 Worth grading? (${worth.length})</div>
+      <div class="hint" style="margin-bottom:8px">Raw value above ~$${threshold.toFixed(0)} — a clean PSA 9–10 could beat the $${fee} fee. Check condition on each.</div>`;
+    worth.forEach(e => {
+      const psa10 = e.price * 8;   // rough PSA-10 multiple
+      html += `<div class="coll-item">
+        ${e.image ? `<img src="${e.image}" onerror="this.style.visibility='hidden'">` : `<div class="result-thumb"></div>`}
+        <div class="coll-info">
+          <div class="coll-name">${e.name}</div>
+          <div class="coll-sub">raw $${e.price.toFixed(2)} → PSA 10 ≈ $${psa10.toFixed(0)}</div>
+          <div class="coll-val">potential +$${(psa10 - e.price - fee).toFixed(0)} if it grades 10</div>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  html += '<div class="panel"><div class="sec">Your cards</div>';
   coll.forEach(e => {
     const val = e.price != null ? `$${(e.price * e.qty).toFixed(2)}` : (e.jp ? '🇯🇵 —' : '—');
     const img = e.image ? `<img src="${e.image}" onerror="this.style.visibility='hidden'">` : `<div class="result-thumb"></div>`;
@@ -655,7 +694,44 @@ function renderCollection() {
     </div>`;
   });
   html += '</div>';
+
+  html += backupPanelHtml();
   el.innerHTML = html;
+}
+
+function exportCollection() {
+  const coll = getCollection();
+  if (!coll.length) { alert('Nothing to back up yet.'); return; }
+  const code = 'PTCG1:' + btoa(unescape(encodeURIComponent(JSON.stringify(coll))));
+  const out = document.getElementById('backupOut');
+  out.value = code; out.style.display = 'block'; out.select();
+  navigator.clipboard?.writeText(code).then(
+    () => alert('Backup code copied to clipboard! Save it somewhere, or paste it into "Restore" on your other phone.'),
+    () => alert('Backup code is shown below — long-press to copy it.')
+  );
+}
+
+function importCollection() {
+  const raw = (document.getElementById('backupIn').value || '').trim();
+  if (!raw) { alert('Paste a backup code first.'); return; }
+  let imported;
+  try {
+    const b64 = raw.startsWith('PTCG1:') ? raw.slice(6) : raw;
+    imported = JSON.parse(decodeURIComponent(escape(atob(b64))));
+    if (!Array.isArray(imported)) throw new Error('bad format');
+  } catch(e) { alert("That code didn't look valid. Make sure you copied the whole thing."); return; }
+
+  const coll = getCollection();
+  const byKey = {}; coll.forEach(e => byKey[e.key] = e);
+  let added = 0, updated = 0;
+  imported.forEach(im => {
+    if (!im || !im.key) return;
+    if (byKey[im.key]) { const n = Math.max(byKey[im.key].qty || 1, im.qty || 1); if (n !== byKey[im.key].qty) updated++; byKey[im.key].qty = n; }
+    else { coll.push(im); byKey[im.key] = im; added++; }
+  });
+  saveCollection(coll);
+  renderCollection();
+  alert(`Merged: ${added} new card(s) added, ${updated} updated.`);
 }
 
 async function refreshCollectionPrices() {
@@ -1377,6 +1453,7 @@ function getGradeCost() {
 loadSettings();
 setLang(localStorage.getItem('card_lang') || 'en');
 renderHistory();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
 </html>
