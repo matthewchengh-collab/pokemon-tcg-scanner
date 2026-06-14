@@ -10,7 +10,6 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.svg">
 <title>Pokemon Card Scanner</title>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
   body {
@@ -184,7 +183,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v19</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v20</span></p>
 </div>
 
 <div class="nav">
@@ -504,7 +503,7 @@ function renderResultsList(cards) {
     const p = bestPrice(c);
     const priceStr = p && p.market != null ? `$${p.market.toFixed(2)}` : (c._jp ? '🇯🇵' : '—');
     const thumb = c.images?.small
-      ? `<img src="${c.images.small}" onerror="this.style.display='none'">`
+      ? `<img src="${c.images.small}" loading="lazy" decoding="async" onerror="this.style.display='none'">`
       : `<div class="result-thumb"></div>`;
     const sub = c._jp
       ? `${c.set?.name || 'Japanese card'} · #${c.number}`
@@ -554,7 +553,7 @@ function renderHistory() {
     Recent <span style="font-size:11px;color:#8a7fb0;cursor:pointer;font-weight:400" onclick="clearHistory()">clear</span></div><div class="hist-row">`;
   hist.forEach((h, i) => {
     const val = h.price != null ? '$' + h.price.toFixed(0) : (h.jp ? '🇯🇵' : '—');
-    const img = h.image ? `<img src="${h.image}" onerror="this.outerHTML='<div class=\\'hist-noimg\\'>🃏</div>'">` : `<div class="hist-noimg">🃏</div>`;
+    const img = h.image ? `<img src="${h.image}" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'hist-noimg\\'>🃏</div>'">` : `<div class="hist-noimg">🃏</div>`;
     html += `<div class="hist-item" onclick="openHistory(${i})">${img}
       <div class="hist-name">${h.name}</div><div class="hist-val">${val}</div></div>`;
   });
@@ -663,7 +662,7 @@ function renderCollection() {
     worth.forEach(e => {
       const psa10 = e.price * 8;   // rough PSA-10 multiple
       html += `<div class="coll-item">
-        ${e.image ? `<img src="${e.image}" onerror="this.style.visibility='hidden'">` : `<div class="result-thumb"></div>`}
+        ${e.image ? `<img src="${e.image}" loading="lazy" decoding="async" onerror="this.style.visibility='hidden'">` : `<div class="result-thumb"></div>`}
         <div class="coll-info">
           <div class="coll-name">${e.name}</div>
           <div class="coll-sub">raw $${e.price.toFixed(2)} → PSA 10 ≈ $${psa10.toFixed(0)}</div>
@@ -677,7 +676,7 @@ function renderCollection() {
   html += '<div class="panel"><div class="sec">Your cards</div>';
   coll.forEach(e => {
     const val = e.price != null ? `$${(e.price * e.qty).toFixed(2)}` : (e.jp ? '🇯🇵 —' : '—');
-    const img = e.image ? `<img src="${e.image}" onerror="this.style.visibility='hidden'">` : `<div class="result-thumb"></div>`;
+    const img = e.image ? `<img src="${e.image}" loading="lazy" decoding="async" onerror="this.style.visibility='hidden'">` : `<div class="result-thumb"></div>`;
     html += `<div class="coll-item">
       ${img}
       <div class="coll-info">
@@ -914,10 +913,25 @@ const WHITELIST = {
   number: '0123456789/',
   name:   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz '.-",
 };
-let ocrWorker = null;
+let ocrWorker = null, _tessLoad = null;
+
+// Load the OCR library on demand (keeps it off the initial page load — search/AI scan don't need it)
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve();
+  if (_tessLoad) return _tessLoad;
+  _tessLoad = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload = resolve;
+    s.onerror = () => { _tessLoad = null; reject(new Error('Failed to load OCR library')); };
+    document.head.appendChild(s);
+  });
+  return _tessLoad;
+}
 
 async function getOcrWorker() {
   if (ocrWorker) return ocrWorker;
+  await loadTesseract();
   if (!window.Tesseract) throw new Error('OCR library not loaded — check your connection');
   document.getElementById('scanStatus').textContent = '⏳ Loading scanner (first time only)…';
   ocrWorker = await Tesseract.createWorker('eng');
