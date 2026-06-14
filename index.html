@@ -204,7 +204,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v27</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v28</span></p>
 </div>
 
 <div class="nav">
@@ -693,6 +693,7 @@ function openHistory(i) {
 }
 
 function clearHistory() {
+  if (!confirm('Clear your recent-scans list? (Your Collection is not affected.)')) return;
   localStorage.removeItem('scan_history');
   renderHistory();
 }
@@ -746,7 +747,9 @@ function setPaid(key) {
 }
 
 function removeFromCollection(key) {
-  saveCollection(getCollection().filter(e => e.key !== key));
+  const e = getCollection().find(x => x.key === key);
+  if (!confirm(`Remove "${e ? e.name : 'this card'}" from your collection?`)) return;
+  saveCollection(getCollection().filter(x => x.key !== key));
   renderCollection();
 }
 
@@ -1013,20 +1016,25 @@ function renderCardDetail(card) {
   const ebayUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(ebayKw)}` + (card._jp ? '&LH_Sold=1&LH_Complete=1' : '');
   html += '<div style="margin-top:16px">';
   const hasKey = !!localStorage.getItem('anthropic_api_key');
-  // one-tap: grade this card straight from the scan photo (same photo, no re-shoot)
-  if (lastScanPhoto && hasKey) {
-    html += `<button class="btn btn-primary" style="background:linear-gradient(135deg,#a06bff 0%,#ff6bcb 100%);color:#fff" onclick="gradeFromScan()">✨ Grade this card from your scan</button>`;
-    html += `<button class="btn btn-secondary" onclick="checkAuthenticity()">🔍 Check if genuine (from your scan)</button>`;
-  }
-  // Japanese cards: AI translation to English
-  if (card._jp && hasKey) {
-    html += `<button class="btn btn-secondary" onclick="translateCard()">🌐 Translate to English (AI)</button>`;
-  }
+
+  // Core actions
   const inColl = isInCollection(card);
   html += `<button class="btn ${inColl ? 'btn-secondary' : 'btn-primary'}" id="collectBtn" onclick="toggleCollection()">${inColl ? '✓ In your collection — tap to remove' : '➕ Add to Collection'}</button>`;
+  html += `<button class="btn btn-primary" onclick="showTab('condition')">🔬 Assess Condition</button>`;
+
+  // ✨ AI tools (grouped, only what applies)
+  const aiBtns = [];
+  if (lastScanPhoto && hasKey) {
+    aiBtns.push(`<button class="btn btn-secondary" onclick="gradeFromScan()">✨ Grade from your scan</button>`);
+    aiBtns.push(`<button class="btn btn-secondary" onclick="checkAuthenticity()">🔍 Check if genuine</button>`);
+  }
+  if (card._jp && hasKey) aiBtns.push(`<button class="btn btn-secondary" onclick="translateCard()">🌐 Translate to English</button>`);
+  if (aiBtns.length) html += `<div class="divider"></div><div class="sec">✨ AI tools</div>` + aiBtns.join('');
+
+  // External links
   const chartKw  = card._jp ? `${card.name} ${card.number} japanese pokemon` : `${card.name} ${card.number} pokemon`;
   const chartUrl = `https://www.pricecharting.com/search-products?type=prices&q=${encodeURIComponent(chartKw)}`;
-  html += `<button class="btn btn-primary" onclick="showTab('condition')">🔬 Assess Condition</button>
+  html += `<div class="divider"></div>
     <button class="btn btn-secondary" onclick="window.open('${chartUrl}','_blank')">📈 Price history (chart)</button>
     <button class="btn btn-secondary" onclick="window.open('${ebayUrl}','_blank')">${card._jp ? 'See sold on eBay →' : 'See on eBay →'}</button>
   </div>`;
