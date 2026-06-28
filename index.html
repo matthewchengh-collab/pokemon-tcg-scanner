@@ -204,7 +204,7 @@
 
 <div class="header">
   <h1>⚡ Pokémon Card Scanner</h1>
-  <p>Value lookup + grading analysis · <span style="opacity:0.6">v29</span></p>
+  <p>Value lookup + grading analysis · <span style="opacity:0.6">v30</span></p>
 </div>
 
 <div class="nav">
@@ -512,7 +512,10 @@ async function doSearchEN(name, num) {
     }
 
     if (!cards.length) {
-      // number-only with no English match → it may be a Japanese card; offer the JP lookup
+      // pokemontcg.io doesn't have it — try TCGdex English (catches new sets it hasn't indexed yet)
+      setResults('<div class="loading">🔍 Checking newer sets…</div>');
+      if (await tryTcgdexEN(name, num)) return;
+      // still nothing → it may be a Japanese card; offer the JP lookup
       const jpHint = num ? `<br><button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="doSearchJP('', '${num.replace(/'/g, '')}')">🇯🇵 Search Japanese cards instead</button>` : '';
       setResults(`<div class="err">No cards found.${num ? ' Double-check the number,' : ' Try a different name'} ${num ? 'or:' : '.'}${jpHint}</div>`);
       return;
@@ -537,11 +540,67 @@ async function getJpSets() {
 
 function mapJP(brief, setName) {
   return (brief || []).map(c => ({
-    _jp: true, id: c.id, name: c.name, number: c.localId,
+    _jp: true, _loc: 'ja', id: c.id, name: c.name, number: c.localId,
     rarity: '', set: { name: setName || '' },
     images: { small: c.image ? c.image + '/low.webp' : null, large: c.image ? c.image + '/high.png' : null },
     tcgplayer: null,
   }));
+}
+
+// English cards via TCGdex — fallback for new sets pokemontcg.io hasn't indexed yet (no price feed yet)
+let _enSets = null;
+async function getEnSets() {
+  if (_enSets) return _enSets;
+  _enSets = await fetch('https://api.tcgdex.net/v2/en/sets').then(r => r.json());
+  return _enSets;
+}
+function mapEN(brief, setName) {
+  return (brief || []).map(c => ({
+    _tcgdex: true, _loc: 'en', id: c.id, name: c.name, number: c.localId,
+    rarity: '', set: { name: setName || '' },
+    images: { small: c.image ? c.image + '/low.webp' : null, large: c.image ? c.image + '/high.png' : null },
+    tcgplayer: null,
+  }));
+}
+function renderTcgdexResults(cards) {
+  const capped = cards.slice(0, 40);
+  _searchCards = capped;
+  if (capped.length === 1) { selectCardJP(capped[0]); return; }
+  renderResultsList(capped);
+}
+
+// Try TCGdex English for a card pokemontcg.io doesn't have. Returns true if it rendered something.
+async function tryTcgdexEN(name, num) {
+  try {
+    if (name) {
+      const brief = await fetch(`https://api.tcgdex.net/v2/en/cards?name=${encodeURIComponent(name)}`).then(r => r.json());
+      const cards = mapEN(brief);
+      if (cards.length) { renderTcgdexResults(cards); return true; }
+      return false;
+    }
+    const parts   = (num || '').split('/');
+    const cardNum = parseInt((parts[0] || '').replace(/[^0-9]/g, ''), 10);
+    const denom   = parseInt((parts[1] || '').replace(/[^0-9]/g, ''), 10);
+    if (denom) {
+      const sets = await getEnSets();
+      const matchSets = sets.filter(s => s.cardCount && (s.cardCount.official === denom || s.cardCount.total === denom)).slice(0, 10);
+      const details = await Promise.all(matchSets.map(s => fetch(`https://api.tcgdex.net/v2/en/sets/${s.id}`).then(r => r.json()).catch(() => null)));
+      const found = [];
+      details.forEach(d => {
+        if (!d || !d.cards) return;
+        const hits = d.cards.filter(c => parseInt(String(c.localId).replace(/[^0-9]/g, ''), 10) === cardNum);
+        found.push(...mapEN(hits, d.name).map(card => { card.set.printedTotal = d.cardCount?.official || ''; return card; }));
+      });
+      if (found.length) { renderTcgdexResults(found); return true; }
+    }
+    if (cardNum) {
+      const bare = (parts[0] || '').replace(/^0+(?=\d)/, '');
+      const brief = await fetch(`https://api.tcgdex.net/v2/en/cards?localId=${encodeURIComponent(bare)}`).then(r => r.json());
+      const cards = mapEN(brief);
+      if (cards.length) { renderTcgdexResults(cards); return true; }
+    }
+  } catch(e) {}
+  return false;
 }
 
 function finishJP(cards) {
@@ -594,8 +653,9 @@ async function doSearchJP(name, num) {
 async function selectCardJP(card) {
   setResults('<div class="loading">Loading card…</div>');
   try {
-    // brief list lacks set/rarity — fetch full detail to enrich
-    const d = await fetch(`${JPAPI}/${card.id}`).then(r => r.json());
+    // brief list lacks set/rarity — fetch full detail to enrich (locale-aware: ja or en)
+    const base = `https://api.tcgdex.net/v2/${card._loc || 'ja'}/cards`;
+    const d = await fetch(`${base}/${card.id}`).then(r => r.json());
     card.set    = { name: d.set?.name || '', printedTotal: d.set?.cardCount?.official || '' };
     card.rarity = d.rarity || '';
     if (d.image) card.images = { small: d.image + '/low.webp', large: d.image + '/high.png' };
@@ -638,7 +698,7 @@ function renderResultsList(cards) {
   setResults(html);
 }
 
-function selectCardByIdx(i) { const c = _searchCards[i]; c._jp ? selectCardJP(c) : selectCard(c); }
+function selectCardByIdx(i) { const c = _searchCards[i]; (c._jp || c._tcgdex) ? selectCardJP(c) : selectCard(c); }
 
 // Deal checker: compare a booth's asking price to market value
 function checkDeal(market) {
@@ -982,7 +1042,9 @@ function renderCardDetail(card) {
   if (card._offline) html += `<div class="verdict v-yellow" style="margin-bottom:12px">📴 <b>Offline mode</b> — saved price snapshot, no image. Connect for the live price & picture.</div>`;
 
   // Prices
-  if (card._jp) {
+  if (card._tcgdex && !card._jp) {
+    html += `<div class="verdict v-yellow">🆕 <b>Newer set — no live price yet.</b><br>This set isn't in the price feed yet (too new). Tap <b>See on eBay</b> / <b>Price history</b> below for real sale prices.</div>`;
+  } else if (card._jp) {
     html += `<div class="verdict v-yellow">🇯🇵 <b>Japanese card — no free live price feed.</b><br>Tap <b>See sold on eBay</b> below for real recent sale prices, then use the Condition tab to judge if it's grade-worthy.</div>`;
   } else if (tp && Object.keys(tp).length) {
     html += `<div class="sec">TCGPlayer Prices</div>`;
